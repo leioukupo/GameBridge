@@ -42,7 +42,8 @@
       "test_compatibility_finds_proton_in_external_steam_library",
       "test_prepare_installs_umu_and_verified_default_runtime",
       "test_on_demand_base_prepare_does_not_download_a_large_proton_runtime",
-      "test_application_only_claims_fresh_matching_steam_install_request"
+      "test_application_only_claims_fresh_matching_steam_install_request",
+      "test_arm_host_uses_its_native_proton_layers_instead_of_x86_archives"
     ],
     "tests/test_epic_provider.py": [
       "test_epic_status_and_library",
@@ -96,7 +97,8 @@
       "test_real_download_progress_records_component_source_and_bytes",
       "test_download_falls_back_to_the_official_route_when_the_gateway_is_down",
       "test_download_rejects_a_gateway_payload_that_fails_the_pinned_digest",
-      "test_download_reports_failure_once_every_route_is_down"
+      "test_download_reports_failure_once_every_route_is_down",
+      "test_native_architecture_follows_the_system_binary_not_the_process"
     ],
     "tests/test_ui_source_contract.py": [
       "test_epic_sync_refreshes_the_library_tab_cache_and_count",

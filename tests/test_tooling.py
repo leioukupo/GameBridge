@@ -1,5 +1,6 @@
 import hashlib
 from io import BytesIO
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 
 import pytest
@@ -215,3 +216,21 @@ def test_real_download_progress_records_component_source_and_bytes(tmp_path, mon
     assert status["source"] == "official"
     assert status["downloadedBytes"] == len(content)
     assert status["progress"] == 1.0
+
+
+def test_native_architecture_follows_the_system_binary_not_the_process():
+    import platform
+
+    from gamebridge.tooling import ToolInstaller
+
+    try:
+        header = Path("/bin/sh").open("rb").read(20)
+    except OSError:
+        header = b""
+    if not header.startswith(b"\x7fELF"):
+        assert ToolInstaller.native_architecture() == platform.machine().lower()
+        return
+
+    machine = int.from_bytes(header[18:20], "little")
+    expected = {62: "x86_64", 183: "aarch64"}.get(machine, platform.machine().lower())
+    assert ToolInstaller.native_architecture() == expected

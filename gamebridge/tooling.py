@@ -108,6 +108,34 @@ class ToolInstaller:
             self._progress.update(values)
 
     @staticmethod
+    def native_architecture() -> str:
+        """Architecture the operating system itself runs.
+
+        An emulated plugin host reports its guest architecture, but the game
+        client starts game processes outside that host. Reading the ELF header
+        of a system binary answers the question without asking this process.
+        """
+        for candidate in (Path("/bin/sh"), Path("/usr/bin/env")):
+            try:
+                with candidate.open("rb") as handle:
+                    header = handle.read(20)
+            except OSError:
+                continue
+            if not header.startswith(b"\x7fELF") or len(header) < 20:
+                continue
+            machine = int.from_bytes(header[18:20], "little")
+            if machine == 0x3E:
+                return "x86_64"
+            if machine == 0xB7:
+                return "aarch64"
+            break
+        return platform.machine().lower()
+
+    def supports_managed_compatibility_tools(self) -> bool:
+        """GameBridge's GE-Proton and DWProton archives are x86_64 only."""
+        return self.native_architecture() in {"x86_64", "amd64"}
+
+    @staticmethod
     def child_architecture() -> str:
         """Architecture that downloaded command-line tools actually run as.
 
@@ -195,7 +223,7 @@ class ToolInstaller:
     def install_compatibility_tool(
         self, release: ToolRelease, destination_root: str | Path
     ) -> dict[str, str]:
-        if platform.machine().lower() not in {"x86_64", "amd64"}:
+        if not self.supports_managed_compatibility_tools():
             raise RuntimeError("managed compatibility tools require x86_64")
         root = Path(destination_root).expanduser().resolve()
         target = root / release.version

@@ -40,7 +40,14 @@ class CompatibilityManager:
 
     def default_runtime_ready(self) -> bool:
         proton = self.default_runtime / "proton"
-        return proton.is_file() and os.access(proton, os.X_OK)
+        if proton.is_file() and os.access(proton, os.X_OK):
+            return True
+        # A host whose system architecture cannot run the x86_64 runtime
+        # archives uses the Proton builds its own game client already ships.
+        return (
+            not self.installer.supports_managed_compatibility_tools()
+            and bool(self.proton_layers())
+        )
 
     def status(self) -> dict[str, Any]:
         layers = self.proton_layers()

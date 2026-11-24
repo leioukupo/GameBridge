@@ -308,3 +308,30 @@ def test_application_only_claims_fresh_matching_steam_install_request(
 
     request.write_text("[]", encoding="utf-8")
     assert application.claim_steam_install_request(2180100) == {"claimed": False}
+
+
+def test_arm_host_uses_its_native_proton_layers_instead_of_x86_archives(
+    tmp_path, monkeypatch
+):
+    from gamebridge.compatibility import CompatibilityManager
+
+    manager = CompatibilityManager(tmp_path / "compat")
+    manager.tools_directory.mkdir(parents=True)
+    (manager.tools_directory / "umu-run").write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(
+        manager.installer, "supports_managed_compatibility_tools", lambda: False
+    )
+    monkeypatch.setattr(
+        manager,
+        "proton_layers",
+        lambda: [("Proton Experimental (ARM64)", tmp_path / "arm64-proton")],
+    )
+    monkeypatch.setattr(manager, "refresh_database", lambda: None)
+
+    def unexpected_runtime(*args, **kwargs):
+        raise AssertionError("x86_64 runtime archives must not be downloaded here")
+
+    monkeypatch.setattr(manager.installer, "install_compatibility_tool", unexpected_runtime)
+
+    assert manager.status()["ready"] is True
+    assert manager.prepare()["ready"] is True
