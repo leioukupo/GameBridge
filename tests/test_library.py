@@ -781,3 +781,52 @@ def test_epic_artwork_selects_logo_independently():
     assert artwork["capsule"].endswith("capsule.jpg")
     assert artwork["logo"].endswith("logo.png")
     assert artwork["hero"] is None
+
+@pytest.mark.asyncio
+async def test_epic_login_stays_connected_when_the_first_library_sync_fails(
+    tmp_path, monkeypatch
+):
+    application = GameBridgeApplication(tmp_path)
+    application.start()
+    provider = application.providers.get("epic")
+    calls: list[str] = []
+
+    class FakeBrowser:
+        async def wait_for_external_route(self):
+            calls.append("browser-open")
+
+        async def wait_for_epic_code(self):
+            calls.append("user-accepted")
+            return "private-code"
+
+        async def navigate_back(self):
+            calls.append("browser-closed")
+
+    async def fake_authenticate(code):
+        calls.append("authenticated")
+
+    async def fake_sync(provider_id):
+        calls.append("synced")
+        raise RuntimeError("epic.sync_failed")
+
+    async def fake_status():
+        calls.append("status")
+        return {"state": "connected"}
+
+    monkeypatch.setattr(application_module, "SteamBrowserAuthorization", FakeBrowser)
+    monkeypatch.setattr(provider, "authenticate", fake_authenticate)
+    monkeypatch.setattr(application, "sync_provider_library", fake_sync)
+    monkeypatch.setattr(provider, "connection_status", fake_status)
+
+    assert await application.automatic_epic_login() == {
+        "state": "connected",
+        "librarySyncFailed": True,
+    }
+    assert calls == [
+        "browser-open",
+        "user-accepted",
+        "authenticated",
+        "browser-closed",
+        "synced",
+        "status",
+    ]

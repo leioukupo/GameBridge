@@ -78,10 +78,15 @@ class Plugin:
         except Exception:
             decky.logger.exception("Epic automatic login or initial library sync failed")
             raise
-        decky.logger.info(
-            "Epic automatic login completed games=%d",
-            int(result.get("libraryCount", 0)),
-        )
+        if result.get("librarySyncFailed"):
+            decky.logger.warning(
+                "Epic automatic login connected but the initial library sync failed"
+            )
+        else:
+            decky.logger.info(
+                "Epic automatic login completed games=%d",
+                int(result.get("libraryCount", 0)),
+            )
         self._queue_artwork_refresh("epic")
         return result
 

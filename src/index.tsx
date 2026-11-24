@@ -125,7 +125,7 @@ const getToolDownloadProgress = callable<[], ToolDownloadProgress>("tool_downloa
 const prepareHoYoPlayGameRuntime = callable<[gameId: string], { version: string; path: string }>("prepare_hoyoplay_game_runtime");
 const claimSteamInstallRequest = callable<[appId: number], { claimed: boolean }>("claim_steam_install_request");
 const installProviderTool = callable<[providerId: string], { version: string; path: string }>("install_provider_tool");
-const automaticEpicLogin = callable<[], { state: string; libraryCount?: number }>("automatic_epic_login");
+const automaticEpicLogin = callable<[], { state: string; libraryCount?: number; librarySyncFailed?: boolean }>("automatic_epic_login");
 const syncProviderLibrary = callable<[providerId: string], { count: number }>("sync_provider_library");
 const refreshProviderStatus = callable<[providerId: string], { state: string }>("refresh_provider_status");
 const logoutProvider = callable<[providerId: string], { state: string; browserSessionCleared?: boolean }>("logout_provider");
@@ -2227,12 +2227,14 @@ function Content() {
       setLibrarySyncMessage(undefined);
       const authentication = automaticEpicLogin();
       Navigation.NavigateToExternalWeb(EPIC_LOGIN_URL);
-      const result = await withTimeout(authentication, 360000);
+      const result = await withTimeout(authentication, 480000);
       (Navigation as typeof Navigation & { NavigateBack?: () => void }).NavigateBack?.();
       await refresh();
       await refreshSteamLibraryGameCache();
       if (typeof result.libraryCount === "number") {
         setLibrarySyncMessage(t("librarySyncComplete", { count: result.libraryCount }));
+      } else if (result.librarySyncFailed) {
+        setLibrarySyncMessage(t("librarySyncPendingAfterLogin"));
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));

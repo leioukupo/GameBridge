@@ -335,3 +335,9 @@ def test_epic_sync_refreshes_the_library_tab_cache_and_count() -> None:
     assert 'setLibrarySyncMessage(t("librarySyncBusy"))' in SOURCE
     assert 'setLibrarySyncMessage(t("librarySyncComplete", { count: synchronizedGames }))' in SOURCE
     assert 'setLibrarySyncMessage(t("librarySyncFailed", { error:' in SOURCE
+
+def test_epic_login_wait_covers_the_backend_and_leaves_a_retry_hint() -> None:
+    assert "librarySyncFailed?: boolean" in SOURCE
+    assert "await withTimeout(authentication, 480000)" in SOURCE
+    assert "await withTimeout(authentication, 360000)" not in SOURCE
+    assert 'setLibrarySyncMessage(t("librarySyncPendingAfterLogin"))' in SOURCE

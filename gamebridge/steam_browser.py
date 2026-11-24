@@ -212,16 +212,26 @@ class SteamBrowserAuthorization:
                 "returnByValue": True,
             },
         )
+        page_is_readable = False
         runtime_result = content_result.get("result", {})
         if isinstance(runtime_result, dict):
             page_text = runtime_result.get("value")
-            if isinstance(page_text, str):
+            if isinstance(page_text, str) and page_text.strip():
+                page_is_readable = True
                 code = cls._extract_code(page_text)
                 if code:
                     return code
                 corrective_action = cls._extract_corrective_action(page_text)
                 if corrective_action:
                     raise EpicCorrectiveActionRequired(corrective_action)
+
+        if page_is_readable:
+            # Steam is already showing the Epic page, so re-reading that page is
+            # the only polling action needed. Replaying the authorization
+            # endpoint with the account's session cookies on every poll would
+            # start while the user is still typing credentials and makes Epic
+            # answer with repeated captcha challenges.
+            return None
 
         # Compatibility fallback for older CEF builds where Runtime.evaluate
         # cannot expose the external page's body.

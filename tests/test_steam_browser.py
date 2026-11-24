@@ -198,3 +198,37 @@ def test_external_route_detection_requires_shared_context() -> None:
     assert detect({"title": "SharedJSContext", "url": "https://steamloopback.host/routes/externalweb"})
     assert not detect({"title": "Epic", "url": "https://steamloopback.host/routes/externalweb"})
     assert not detect({"title": "SharedJSContext", "url": "https://steamloopback.host/routes/library"})
+def test_login_page_body_does_not_replay_the_epic_authorization_endpoint(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def command(cls, websocket_url, method, params=None):
+        calls.append(method)
+        if method == "Runtime.evaluate":
+            return {"result": {"value": "Sign in to your Epic Games account"}}
+        raise AssertionError(f"unexpected fallback call: {method}")
+
+    monkeypatch.setattr(SteamBrowserAuthorization, "_cdp_command", classmethod(command))
+
+    assert SteamBrowserAuthorization._code_from_session(
+        "ws://127.0.0.1:8080/devtools/page/epic"
+    ) is None
+    assert calls == ["Runtime.evaluate"]
+
+
+def test_blank_page_body_still_reaches_the_cookie_fallback(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def command(cls, websocket_url, method, params=None):
+        calls.append(method)
+        if method == "Runtime.evaluate":
+            return {"result": {"value": ""}}
+        if method == "Network.getAllCookies":
+            return {"cookies": []}
+        raise AssertionError(f"unexpected fallback call: {method}")
+
+    monkeypatch.setattr(SteamBrowserAuthorization, "_cdp_command", classmethod(command))
+
+    assert SteamBrowserAuthorization._code_from_session(
+        "ws://127.0.0.1:8080/devtools/page/epic"
+    ) is None
+    assert calls == ["Runtime.evaluate", "Network.getAllCookies"]

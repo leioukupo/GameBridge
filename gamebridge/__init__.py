@@ -1,3 +1,3 @@
 """GameBridge domain and application services."""
 
-__version__ = "0.19.0-beta.6"
+__version__ = "0.19.0-beta.7"

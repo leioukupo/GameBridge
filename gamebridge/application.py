@@ -432,8 +432,19 @@ class GameBridgeApplication:
             # Always leave the external route after Epic produced a code. This
             # also prevents authentication errors from trapping the user there.
             await browser.navigate_back()
-        sync_result = await self.sync_provider_library("epic")
+        library_sync_failed = False
+        try:
+            sync_result = await self.sync_provider_library("epic")
+        except Exception:
+            # Epic has already issued and consumed the authorization code, so the
+            # account is connected even when the first library sync is slow or
+            # fails. Turning that into a login failure drops the user back onto
+            # the login page; the library keeps its own sync action.
+            library_sync_failed = True
+            sync_result = None
         status = await provider.connection_status()
+        if library_sync_failed:
+            return {**status, "librarySyncFailed": True}
         return {**status, "libraryCount": sync_result["count"]}
 
     async def refresh_provider_status(self, provider_id: str) -> dict[str, object]:
