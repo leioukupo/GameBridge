@@ -69,3 +69,16 @@ async def test_process_runner_allows_a_larger_limit_for_one_bounded_command():
         output_limit=16,
     )
     assert result.stdout.strip() == "12345"
+@pytest.mark.asyncio
+async def test_process_error_keeps_the_tail_of_a_long_failure():
+    runner = SafeProcessRunner()
+    marker = "root-cause-on-the-last-line"
+    program = (
+        "import sys; sys.stderr.write('noise ' * 4000); sys.stderr.write('" + marker + "')"
+        "; raise SystemExit(4)"
+    )
+
+    with pytest.raises(ProcessError) as raised:
+        await runner.run(sys.executable, "-c", program)
+
+    assert str(raised.value).endswith(marker)

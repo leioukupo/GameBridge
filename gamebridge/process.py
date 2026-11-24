@@ -18,7 +18,9 @@ class ProcessError(RuntimeError):
     def __init__(self, result: ProcessResult) -> None:
         self.result = result
         message = result.stderr.strip() or result.stdout.strip() or "command failed"
-        super().__init__(message[:500])
+        # A failing command states its reason on the last lines. Keeping the head
+        # of a long traceback cut away the only part that identifies the cause.
+        super().__init__(message[-500:])
 
 
 class SafeProcessRunner:
