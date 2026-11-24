@@ -358,7 +358,11 @@ class Plugin:
         return await self.app.install_requirements(game_id, path)
 
     async def storage_locations(self, game_id: str) -> dict[str, object]:
-        return await self.app.storage_locations(game_id)
+        try:
+            return await self.app.storage_locations(game_id)
+        except (OSError, RuntimeError, ValueError) as exc:
+            decky.logger.error("Epic storage locations unavailable reason=%s", exc)
+            raise
 
     async def get_install_job(self, job_id: str) -> dict[str, object]:
         return self.app.install_job(job_id)

@@ -22,6 +22,18 @@ EPIC_LIBRARY_OUTPUT_LIMIT = 128 * 1024 * 1024
 # library sync window the interface already allows.
 EPIC_LIBRARY_TIMEOUT = 120
 
+# Legendary unpacks native helper modules for a single CPU architecture.  When
+# the unpacked set belongs to another architecture, the interpreter reports it
+# while importing Legendary itself, before any command runs.
+CLI_NATIVE_MODULE_MARKER = "Cannot load native module"
+
+
+def cli_failure_code(stderr: str) -> str:
+    """Translate a Legendary command failure into a code the UI can explain."""
+    if CLI_NATIVE_MODULE_MARKER in stderr:
+        return "epic.cli_arch_mismatch"
+    return "epic.cli_failed"
+
 
 class EpicProvider(GameProvider):
     provider_id = "epic"
@@ -157,6 +169,15 @@ class EpicProvider(GameProvider):
                 environment=self.environment(),
                 check=False,
             )
+            if cli_failure_code(result.stderr) == "epic.cli_arch_mismatch":
+                # The build placed in the tools directory cannot run in this
+                # process tree. The card's install action re-downloads the
+                # matching build and clears the unpacked helper cache.
+                return {
+                    "state": "unavailable",
+                    "message": "epic.cli_arch_mismatch",
+                    "action": "install_cli",
+                }
             payload = self._parse_json(result.stdout)
             signed_in = result.returncode == 0 and self._is_signed_in(payload)
             return {
@@ -168,7 +189,7 @@ class EpicProvider(GameProvider):
         except (OSError, RuntimeError, ValueError) as exc:
             if cached_status.get("state") in {"connected", "disconnected"}:
                 return {**cached_status, "offline": True}
-            return {"state": "error", "message": str(exc)[:300]}
+            return {"state": "error", "message": cli_failure_code(str(exc))}
 
     def cached_connection_status(self) -> JsonObject:
         executable = self.executable()
@@ -376,9 +397,12 @@ class EpicProvider(GameProvider):
         executable = self.executable()
         if executable is None:
             raise RuntimeError("legendary.not_installed")
-        result = await self.runner.run(
-            executable, "info", external_game_id, "--json", environment=self.environment()
-        )
+        try:
+            result = await self.runner.run(
+                executable, "info", external_game_id, "--json", environment=self.environment()
+            )
+        except ProcessError as exc:
+            raise RuntimeError(cli_failure_code(exc.result.stderr)) from None
         payload = self._parse_json(result.stdout)
         manifest = payload.get("manifest") if isinstance(payload, dict) else None
         if not isinstance(manifest, dict):

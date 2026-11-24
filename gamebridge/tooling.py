@@ -111,10 +111,12 @@ class ToolInstaller:
     def child_architecture() -> str:
         """Architecture that downloaded command-line tools actually run as.
 
-        An x86_64 plugin host can be emulated (FEX on an aarch64 SteamOS
-        build). Emulation does not extend to the x86_64 Legendary build's own
-        native helper modules, so the command-line tool has to match the
-        machine under ``/bin/uname`` instead of the host process.
+        A plugin host can itself be emulated: an x86_64 Decky host running
+        under FEX on an aarch64 machine starts its children in that same
+        translated mode, so a child still reports x86_64. Asking a child keeps
+        the downloaded build matched to the interpreter that loads its native
+        helper modules, which is the value that matters on a native aarch64
+        host as well.
         """
         uname = shutil.which("uname")
         machine = ""

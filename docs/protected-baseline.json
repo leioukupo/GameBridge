@@ -48,7 +48,9 @@
       "test_epic_status_and_library",
       "test_epic_uninstall_uses_legendary",
       "test_epic_library_uses_a_bounded_longer_window",
-      "test_clearing_the_cli_bundle_cache_keeps_account_and_install_metadata"
+      "test_clearing_the_cli_bundle_cache_keeps_account_and_install_metadata",
+      "test_install_sizes_reports_a_stable_code_when_legendary_cannot_run",
+      "test_connection_status_asks_to_reinstall_a_mismatched_legendary_build"
     ],
     "tests/test_hoyoplay_provider.py": [
       "test_provider_captures_and_switches_exact_official_channel_profiles",

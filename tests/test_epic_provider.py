@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from gamebridge.process import ProcessResult
+from gamebridge.process import ProcessError, ProcessResult
 from gamebridge.providers.epic import EpicProvider
 
 
@@ -320,3 +320,47 @@ def test_partial_uninstall_only_removes_owned_game_files(tmp_path):
     assert not game_folder.exists()
     assert not (temporary / "SampleApp.resume").exists()
     assert other_folder.is_dir()
+class NativeModuleFailureRunner:
+    """Mimics Legendary failing at import because its helpers are another arch."""
+
+    stderr = (
+        "OSError: Cannot load native module 'Cryptodome.Util._cpuid_c': "
+        "Not found '_cpuid_c.cpython-314-x86_64-linux-gnu.so'"
+    )
+
+    async def run(self, executable, *arguments, **kwargs):
+        result = ProcessResult((str(executable), *arguments), 1, "", self.stderr)
+        if kwargs.get("check", True):
+            raise ProcessError(result)
+        return result
+
+
+@pytest.mark.asyncio
+async def test_install_sizes_reports_a_stable_code_when_legendary_cannot_run(
+    tmp_path, monkeypatch
+):
+    executable = tmp_path / "legendary"
+    executable.touch(mode=0o755)
+    provider = EpicProvider(tmp_path / "data", runner=NativeModuleFailureRunner())
+    monkeypatch.setattr(provider, "executable", lambda: executable)
+
+    with pytest.raises(RuntimeError, match="epic.cli_arch_mismatch") as raised:
+        await provider.install_sizes("SampleApp")
+
+    assert "Cannot load native module" not in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_connection_status_asks_to_reinstall_a_mismatched_legendary_build(
+    tmp_path, monkeypatch
+):
+    executable = tmp_path / "legendary"
+    executable.touch(mode=0o755)
+    provider = EpicProvider(tmp_path / "data", runner=NativeModuleFailureRunner())
+    monkeypatch.setattr(provider, "executable", lambda: executable)
+
+    status = await provider.connection_status()
+
+    assert status["state"] == "unavailable"
+    assert status["message"] == "epic.cli_arch_mismatch"
+    assert status["action"] == "install_cli"
