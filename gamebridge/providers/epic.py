@@ -22,6 +22,11 @@ EPIC_LIBRARY_OUTPUT_LIMIT = 128 * 1024 * 1024
 # library sync window the interface already allows.
 EPIC_LIBRARY_TIMEOUT = 120
 
+# While an install is running, Legendary is busy unpacking and the size lookup
+# for the install dialog waits behind it. The generic 30 second window was
+# measured cutting that call off during a live download.
+EPIC_INFO_TIMEOUT = 90
+
 # Legendary unpacks native helper modules for a single CPU architecture.  When
 # the unpacked set belongs to another architecture, the interpreter reports it
 # while importing Legendary itself, before any command runs.
@@ -399,7 +404,12 @@ class EpicProvider(GameProvider):
             raise RuntimeError("legendary.not_installed")
         try:
             result = await self.runner.run(
-                executable, "info", external_game_id, "--json", environment=self.environment()
+                executable,
+                "info",
+                external_game_id,
+                "--json",
+                environment=self.environment(),
+                timeout=EPIC_INFO_TIMEOUT,
             )
         except ProcessError as exc:
             raise RuntimeError(cli_failure_code(exc.result.stderr)) from None

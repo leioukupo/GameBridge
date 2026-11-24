@@ -364,3 +364,17 @@ async def test_connection_status_asks_to_reinstall_a_mismatched_legendary_build(
     assert status["state"] == "unavailable"
     assert status["message"] == "epic.cli_arch_mismatch"
     assert status["action"] == "install_cli"
+@pytest.mark.asyncio
+async def test_install_size_lookup_uses_a_bounded_longer_window(tmp_path, monkeypatch):
+    from gamebridge.providers.epic import EPIC_INFO_TIMEOUT
+
+    executable = tmp_path / "legendary"
+    executable.touch(mode=0o755)
+    runner = RecordingRunner()
+    provider = EpicProvider(tmp_path / "data", runner=runner)
+    monkeypatch.setattr(provider, "executable", lambda: executable)
+    with pytest.raises(RuntimeError, match="error.epic_manifest_missing"):
+        await provider.install_sizes("SampleApp")
+
+    assert runner.kwargs["timeout"] == EPIC_INFO_TIMEOUT
+    assert EPIC_INFO_TIMEOUT > 30
