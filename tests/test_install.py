@@ -2,10 +2,161 @@ import asyncio
 
 import pytest
 
+import gamebridge.application as application_module
+from gamebridge.application import GameBridgeApplication
 from gamebridge.database import Database
 from gamebridge.install import EpicInstallManager
 from gamebridge.jobs import InstallJobStore
 from gamebridge.models import JobState
+from gamebridge.providers.epic import EpicProvider
+from gamebridge.storage import StorageRoot
+
+
+@pytest.mark.asyncio
+async def test_install_dialog_lists_storage_when_sizes_are_unreadable(tmp_path, monkeypatch):
+    """A stalled Epic size lookup must not hide the writable storage locations."""
+    application = GameBridgeApplication(tmp_path)
+    application.start()
+    with application.database.connect() as db:
+        db.execute(
+            "INSERT INTO catalog_games(id,title,normalized_title) VALUES(?,?,?)",
+            ("epic:size-test", "Size Test", "size test"),
+        )
+        db.execute(
+            "INSERT INTO game_releases"
+            "(canonical_game_id,provider_id,external_game_id,region,release_channel) "
+            "VALUES(?,?,?,?,?)",
+            ("epic:size-test", "epic", "size-app", "global", "stable"),
+        )
+    provider = application.providers.get("epic")
+    assert isinstance(provider, EpicProvider)
+    monkeypatch.setattr(provider, "executable", lambda: None)
+    monkeypatch.setattr(
+        application_module,
+        "storage_roots",
+        lambda: [StorageRoot(tmp_path, "/dev/root", True)],
+    )
+
+    result = await application.storage_locations("epic:size-test")
+
+    assert result["sizes_available"] is False
+    assert result["sizes_reason"] == "legendary.not_installed"
+    assert result["required_bytes"] == 0
+    assert [item["path"] for item in result["locations"]] == [
+        str(tmp_path / "Games" / "GameBridge" / "Epic")
+    ]
+    assert result["locations"][0]["enough_space"] is True
+    assert result["recommended_id"] == result["locations"][0]["id"]
+
+
+def test_second_epic_download_is_refused_while_one_is_running(tmp_path):
+    """Two Legendary writers would overwrite each other’s install records."""
+    database = Database(tmp_path / "jobs.db")
+    database.initialize()
+    jobs = InstallJobStore(database)
+    running = jobs.create("epic", "first-game", {"installRoot": str(tmp_path / "first")})
+
+    class Provider:
+        pass
+
+    manager = EpicInstallManager(Provider(), jobs)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="install.another_running"):
+        manager.start("second-game", "Second Game", tmp_path / "second")
+
+    assert [job.id for job in jobs.active()] == [running.id]
+
+
+def test_a_paused_epic_download_still_holds_the_slot(tmp_path, monkeypatch):
+    """A paused Legendary is a suspended writer, so it can still overwrite records."""
+    database = Database(tmp_path / "jobs.db")
+    database.initialize()
+    jobs = InstallJobStore(database)
+    paused = jobs.create("epic", "first-game", {"installRoot": str(tmp_path / "first")})
+    jobs.transition(paused.id, JobState.PAUSED)
+
+    class Provider:
+        pass
+
+    manager = EpicInstallManager(Provider(), jobs)  # type: ignore[arg-type]
+    monkeypatch.setattr("gamebridge.install.approved_install_path", lambda candidate: True)
+
+    with pytest.raises(ValueError, match="install.another_running"):
+        manager.start("second-game", "Second Game", tmp_path / "second")
+
+    assert [job.external_game_id for job in jobs.active()] == ["first-game"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_epic_download_does_not_hold_the_slot(tmp_path, monkeypatch):
+    """A retryable failure stays resumable but must not block another install."""
+    database = Database(tmp_path / "jobs.db")
+    database.initialize()
+    jobs = InstallJobStore(database)
+    failed = jobs.create("epic", "first-game", {"installRoot": str(tmp_path / "first")})
+    jobs.transition(failed.id, JobState.VALIDATING)
+    jobs.fail(failed.id, "network dropped", retryable=True)
+
+    class Provider:
+        pass
+
+    manager = EpicInstallManager(Provider(), jobs)  # type: ignore[arg-type]
+    monkeypatch.setattr("gamebridge.install.approved_install_path", lambda candidate: True)
+    started: list[str] = []
+
+    async def fake_run(
+        job_id, app_name, install_root, *, resume_existing=False, operation="install"
+    ):
+        started.append(app_name)
+
+    monkeypatch.setattr(manager, "_run", fake_run)
+    job_id = manager.start("second-game", "Second Game", tmp_path / "second")
+    await manager.tasks[job_id]
+
+    assert started == ["second-game"]
+
+
+def test_install_records_lost_during_a_download_are_written_back(tmp_path):
+    class Provider:
+        def __init__(self) -> None:
+            self.written: dict[str, object] | None = None
+
+        def retained_installations(self):
+            return {"second": {"install_path": "/games/second", "executable": "s.exe"}}
+
+        def restore_retained_installations(self, payload) -> None:
+            self.written = payload
+
+    database = Database(tmp_path / "jobs.db")
+    database.initialize()
+    provider = Provider()
+    manager = EpicInstallManager(provider, InstallJobStore(database))  # type: ignore[arg-type]
+
+    manager._restore_lost_installations({"first": {"install_path": "/games/first", "executable": "f.exe"}})
+
+    assert provider.written == {
+        "second": {"install_path": "/games/second", "executable": "s.exe"},
+        "first": {"install_path": "/games/first", "executable": "f.exe"},
+    }
+
+
+def test_intact_install_records_are_left_alone(tmp_path):
+    calls: list[object] = []
+
+    class Provider:
+        def retained_installations(self):
+            return {"first": {"install_path": "/games/first", "executable": "f.exe"}}
+
+        def restore_retained_installations(self, payload) -> None:
+            calls.append(payload)
+
+    database = Database(tmp_path / "jobs.db")
+    database.initialize()
+    manager = EpicInstallManager(Provider(), InstallJobStore(database))  # type: ignore[arg-type]
+
+    manager._restore_lost_installations({"first": {"install_path": "/games/first", "executable": "f.exe"}})
+
+    assert calls == []
 
 
 def test_legendary_progress_lines_update_persistent_job(tmp_path):
@@ -155,6 +306,14 @@ async def test_isolated_update_simulation_runs_update_and_completes(tmp_path, mo
 
         def mark_updated(self, app_name):
             self.updated.append(app_name)
+
+        @staticmethod
+        def retained_installations():
+            return {}
+
+        @staticmethod
+        def restore_retained_installations(payload):
+            raise AssertionError("nothing to restore here")
 
     provider = Provider()
     manager = EpicInstallManager(provider, jobs)  # type: ignore[arg-type]

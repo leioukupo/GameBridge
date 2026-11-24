@@ -5,6 +5,10 @@ SOURCE = (Path(__file__).resolve().parents[1] / "src/index.tsx").read_text(
     encoding="utf-8"
 )
 
+I18N_SOURCE = (Path(__file__).resolve().parents[1] / "src/i18n.ts").read_text(
+    encoding="utf-8"
+)
+
 
 def test_mihoyo_library_uses_one_combined_tab() -> None:
     assert 'id: "gamebridge-hoyoplay"' not in SOURCE
@@ -355,3 +359,10 @@ def test_shortcut_start_directory_comes_from_the_installed_plugin_root() -> None
     assert "else applyLauncherShortcutTarget(appId, game);" in SOURCE
     assert "launcherShortcutOptions(game)" in SOURCE
     assert "if (!appId || !profile) continue;" not in SOURCE
+
+def test_install_dialog_keeps_working_while_epic_sizes_are_unreadable() -> None:
+    assert "const sizesKnown = storage?.sizes_available !== false;" in SOURCE
+    assert "bOKDisabled={!selected || (sizesKnown && !selected.enough_space)}" in SOURCE
+    assert 'if ((sizesKnown && !location.enough_space) || submitting.current) return;' in SOURCE
+    assert 't("sizeLookupUnavailable")' in SOURCE
+    assert 'value.replace(/^(?:Exception|Error):\s*/, "").trim()' in I18N_SOURCE

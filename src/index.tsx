@@ -140,8 +140,8 @@ const switchHoYoPlayChannelSelection = callable<[channel: "official" | "bilibili
 const startGameInstall = callable<[gameId: string, installPath?: string], { jobId: string }>("start_game_install");
 const startGameUpdate = callable<[gameId: string], { jobId: string }>("start_game_update");
 type StorageLocation = { id: string; name: string; path: string; free_bytes: number; enough_space: boolean; kind: "internal" | "drive" | "sd" };
-const getStorageLocations = callable<[gameId: string], { required_bytes: number; download_bytes: number; locations: StorageLocation[]; recommended_id?: string }>("storage_locations");
-const getInstallRequirements = callable<[gameId: string, path: string], { path: string; free_bytes: number; required_bytes: number; download_bytes: number; enough_space: boolean }>("install_requirements");
+const getStorageLocations = callable<[gameId: string], { required_bytes: number; download_bytes: number; sizes_available?: boolean; sizes_reason?: string; locations: StorageLocation[]; recommended_id?: string }>("storage_locations");
+const getInstallRequirements = callable<[gameId: string, path: string], { path: string; free_bytes: number; required_bytes: number; download_bytes: number; sizes_available?: boolean; sizes_reason?: string; enough_space: boolean }>("install_requirements");
 const getInstallJob = callable<[jobId: string], InstallJob>("get_install_job");
 const pauseInstall = callable<[jobId: string], void>("pause_install");
 const resumeInstall = callable<[jobId: string], void>("resume_install");
@@ -1908,7 +1908,7 @@ function NativeEpicInstallSection({ appId }: { appId: number }) {
 }
 
 function InstallLocationModal({ gameId, gameTitle, artworkUrl, onConfirm, closeModal }: { gameId: string; gameTitle: string; artworkUrl?: string; onConfirm: (path: string) => void; closeModal?: () => void }) {
-  const [storage, setStorage] = useState<{ required_bytes: number; locations: StorageLocation[]; recommended_id?: string }>();
+  const [storage, setStorage] = useState<{ required_bytes: number; sizes_available?: boolean; locations: StorageLocation[]; recommended_id?: string }>();
   const [selectedId, setSelectedId] = useState<string>();
   const [customLocation, setCustomLocation] = useState<StorageLocation>();
   const [storageError, setStorageError] = useState<string>();
@@ -1926,8 +1926,11 @@ function InstallLocationModal({ gameId, gameTitle, artworkUrl, onConfirm, closeM
   }, [gameId]);
   const locations = [...(storage?.locations ?? []), ...(customLocation ? [customLocation] : [])];
   const selected = locations.find((item) => item.id === selectedId);
+  // A size answer is a convenience: when Epic is busy with another download the
+  // locations are still readable and the install can still be started.
+  const sizesKnown = storage?.sizes_available !== false;
   const confirmLocation = (location: StorageLocation) => {
-    if (!location.enough_space || submitting.current) return;
+    if ((sizesKnown && !location.enough_space) || submitting.current) return;
     submitting.current = true;
     onConfirm(location.path);
     closeModal?.();
@@ -1958,9 +1961,9 @@ function InstallLocationModal({ gameId, gameTitle, artworkUrl, onConfirm, closeM
       strTitle={steamT("#GameAction_Install", "install")}
       strOKButtonText={steamT("#GameAction_Install", "install")}
       strCancelButtonText={steamT("#Button_Cancel", "cancel")}
-      bOKDisabled={!selected?.enough_space}
+      bOKDisabled={!selected || (sizesKnown && !selected.enough_space)}
       onOK={() => {
-        if (!selected?.enough_space) return;
+        if (!selected || (sizesKnown && !selected.enough_space)) return;
         onConfirm(selected.path);
         closeModal?.();
       }}
@@ -1970,7 +1973,7 @@ function InstallLocationModal({ gameId, gameTitle, artworkUrl, onConfirm, closeM
         <div style={{ display: "flex", alignItems: "center", gap: 16, minHeight: 72, paddingBottom: 10, borderBottom: "1px solid rgba(255,255,255,.13)" }}>
           {artworkUrl && <img src={artworkUrl} style={{ width: 112, height: 52, borderRadius: 4, objectFit: "cover" }} />}
           <div style={{ flex: 1, fontSize: 18, fontWeight: 400 }}>{gameTitle}</div>
-          <div style={{ fontSize: 14, fontWeight: 700 }}>{storage ? formatBytes(storage.required_bytes) : t("calculating")}</div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>{storage ? (sizesKnown ? formatBytes(storage.required_bytes) : t("sizeUnknown")) : t("calculating")}</div>
         </div>
         {storage && <>
           <div style={{ margin: "16px 0 10px", fontSize: 14, opacity: .72, fontWeight: 700 }}>{steamT("#Installer_ChooseDestinationFolder", "installTo")}</div>
@@ -1978,14 +1981,14 @@ function InstallLocationModal({ gameId, gameTitle, artworkUrl, onConfirm, closeM
             {locations.map((location) => (
               <DialogButton
                 key={location.id}
-                disabled={!location.enough_space}
+                disabled={!sizesKnown || !location.enough_space}
                 onClick={() => {
                   setSelectedId(location.id);
                   confirmLocation(location);
                 }}
                 style={{
                   width: "100%", minHeight: 52, height: 52, padding: "0 18px", borderRadius: 0,
-                  opacity: location.enough_space ? 1 : .45,
+                  opacity: !sizesKnown || location.enough_space ? 1 : .45,
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", width: "100%", gap: 14 }}>
@@ -2010,7 +2013,8 @@ function InstallLocationModal({ gameId, gameTitle, artworkUrl, onConfirm, closeM
             </DialogButton>
           </div>
         </>}
-        {storage && !locations.some((item) => item.enough_space) && <div style={{ color: "#ff6b6b", marginTop: 12 }}>{t("noStorageSpace")}</div>}
+        {storage && sizesKnown && !locations.some((item) => item.enough_space) && <div style={{ color: "#ff6b6b", marginTop: 12 }}>{t("noStorageSpace")}</div>}
+        {storage && !sizesKnown && <div style={{ opacity: .78, marginTop: 12 }}>{t("sizeLookupUnavailable")}</div>}
         {storageError && <div style={{ color: "#ff6b6b", marginTop: 12 }}>{t("storageReadFailed", { error: localizeBackend(storageError) ?? storageError })}</div>}
       </div>
     </ConfirmModal>

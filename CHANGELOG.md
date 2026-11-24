@@ -1,5 +1,13 @@
 # 更新日志
 
+## 0.19.0-beta.16
+
+- 正在下载一款 Epic 游戏时，另一款游戏的安装对话框不再失败。下载会占满与 Epic 的连接，安装体积查询（`legendary info`）因此在 90 秒窗口内超时或读不到应答，插件把整个对话框判为失败。现在存储位置列表只依赖本地读数：体积读不到时照样列出可写入的位置、显示剩余空间并允许开始安装，只是游戏大小显示为未知。上一次成功读到的体积会按游戏缓存在 `providers/epic/cache/install-sizes.json`，下次直接复用。
+- 同一时间只允许一款 Epic 下载在跑。Legendary 结束时是整份重写安装记录文件，两个下载并跑会互相抹掉对方的记录，这正是「安装完成却找不到安装」的来源。已有下载在跑时（包括已暂停、其写入进程只是被挂起的情况）对另一款游戏点安装会给出明确提示：等它完成，或在任务卡片上取消它。下载失败的任务不占用这个位置，可以直接换一款开始。
+- 安装完成后自愈安装记录：本次下载开始前记录在案、结束后却从 `installed.json` 消失的安装项（且文件仍在磁盘上）会被写回去。
+- 界面不再显示后端的 Python 异常原文。PluginLoader 会把后端失败包成 `Exception: <代码>`，语言表按裸代码匹配因此失效；现在先剥掉这层前缀再查表，`epic.cli_failed`、`install.another_running` 等都会显示成本地语言的说明。
+- launcher 找不到安装记录时，启动日志写 `launch <游戏编号> not installed`，不再把游戏编号当成 KeyError 文本重复一遍。
+
 ## 0.19.0-beta.15
 
 - Epic 游戏走客户端自带 Proton 时，不再把本次启动交回 Steam 客户端。Proton 的 `steam.exe` 引导器会用 `SteamGameId` 拼出 `steam://launch/<id>` 让正在运行的 Steam 客户端接手，并断言客户端返回的状态；GameBridge 建的快捷方式在客户端没有这条启动记录，接手必然失败，游戏进程根本没起来就弹出 `Assertion failed!` 与 `Expression: "status"`。现在这条路线去掉引导器用来命名本次会话的 `SteamGameId`、`SteamExe`、`SteamPipe`、`SteamLaunchId`、`SteamPID`，引导器直接运行游戏可执行文件，与游戏客户端自己启动该兼容层的方式一致。

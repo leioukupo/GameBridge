@@ -124,6 +124,22 @@ Steam Deck 的真机结论需要单独记录，不得直接继承 Xbox Ally X �
 
 结论：Epic 游戏从 Steam「开始游戏」进入游戏画面，在这一 aarch64 设备类别上为「已真机验收」。此前记录的架构错配（beta.12）、多余运行时容器层级（beta.13/14）与 Proton 引导器交接断言（beta.15）三个问题均已消除。
 
+2026-11-25 00:20-00:58 在同一台 aarch64 掌机（Armada，Steam 原生 arm64、插件宿主 x86_64 经 FEX 运行插件后端）上定位「正在下载一款 Epic 游戏时，再下载另一款会报 Python 异常；已安装的游戏变成找不到安装」。
+
+测得的机制（设备宿主日志 + 同机现场复现）：
+
+- 下载进行中打开另一款的安装对话框，宿主日志反复出现 `Method storage_locations of plugin GameBridge failed ... Exception: epic.cli_failed`，其中一次是 `command timed out after 90s`，即 90 秒有界窗口内没有等到 Epic 的应答。
+- 在同一台设备、同一份 Epic 配置下直接调用同一个 aarch64 Legendary 构建做同一件事（`info <游戏编号> --json`）：返回码 1，stderr 末段是 `requests.exceptions.ReadTimeout`。下载占满链路时 Epic 的元数据请求会超时，这与插件无关，属于外部条件。
+- 体积查询失败会让整个对话框判失败：`enough_space` 全为假、安装按钮禁用，而存储位置与剩余空间只是本地 `statvfs` 读数，不需要网络。
+- 界面显示的是后端异常原文。PluginLoader 把失败包成 `Exception: <代码>`，语言表按裸代码匹配，因此 `epic.cli_failed` 没被翻译。
+- 两个 Legendary 安装并跑会互相抹掉安装记录：`installed.json` 是每个 Legendary 结束时整份重写，后写完的会覆盖前一个的条目。`install.py` 里已有「Legendary exited without registering the installation; a previous download process may still be shutting down」的检测，指向同一根因。设备侧观察到某款游戏有 Steam 快捷方式但没有安装记录，launcher 当时只写了一行 `prepare failed: ‘<游戏编号>’`（KeyError 文本）。
+
+改动：存储位置列表与体积查询解耦（体积读不到时仍列出可写入位置、显示剩余空间、允许开始安装，`sizes_available=false` + `sizes_reason` 说明原因）；上一次成功的体积按游戏缓存在 `providers/epic/cache/install-sizes.json`，失败时回退；同一时间只允许一款 Epic 下载占位（含已暂停，其写入进程只是被挂起；下载失败的任务不占位），第二款的安装请求给出 `install.another_running` 并提示等完成或取消；安装成功后把本次开始前记录在案、结束后却消失且文件仍在磁盘上的安装项写回 `installed.json`；前端先剥掉 `Exception:` 前缀再查语言表；launcher 找不到安装记录时写 `launch <游戏编号> not installed`。
+
+状态：`GameBridge-v0.19.0-beta.16.zip`（SHA-256 `a56c32455a91487080476f8012db70785c77c6ed942a9df49f82467cb80d3317`）由 `scripts/build_plugin_zip.py` 生成并完整装入该设备，安装后逐文件清单与包内一致，宿主日志出现 `Loaded GameBridge (v0.19.0-beta.16)` 与 `GameBridge backend ready`。下载进行中打开另一款对话框的实际界面结果、以及占位规则的真机表现待用户在设备上点一次确认，本轮只到「已装入安装包 + 自动检查通过」。升级重启插件宿主会打断进行中的下载：该设备上任务 `2dc25e07aa624edf9ff132c09ce23a7c` 停在 `paused` 21.9%，需要在任务卡片上继续；断点续传路径本身仍未做过真机验收。
+
+自动保护新增 8 条锁定测试：体积成功答案写缓存并在失败时回退、无缓存时仍返回稳定代码、体积不可读时仍列存储位置且不禁用安装、已有下载时第二款被拒、暂停中的下载同样占位、下载失败的任务不占位、安装记录被抹掉后回写、记录完整时不改写，以及安装对话框按 `sizes_available` 放行的界面合同。
+
 ## 自动保护基线
 
 下列部分必须继续通过 Python 测试、TypeScript 类型检查和前端构建：

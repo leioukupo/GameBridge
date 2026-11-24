@@ -420,6 +420,41 @@ async def test_install_sizes_reports_a_stable_code_when_legendary_cannot_run(
     assert "Cannot load native module" not in str(raised.value)
 
 
+class SizeLookupTimeoutRunner:
+    """Epic stops answering metadata requests while a download saturates the link."""
+
+    async def run(self, executable, *arguments, **kwargs):
+        raise TimeoutError("command timed out after 90s")
+
+
+@pytest.mark.asyncio
+async def test_epic_install_sizes_reuse_the_recorded_answer(tmp_path, monkeypatch):
+    executable = tmp_path / "legendary"
+    executable.touch(mode=0o755)
+    recorded = EpicProvider(tmp_path / "data", runner=InstallInfoRunner())
+    monkeypatch.setattr(recorded, "executable", lambda: executable)
+    assert await recorded.install_sizes("SampleApp") == {
+        "required_bytes": 700,
+        "download_bytes": 600,
+    }
+
+    busy = EpicProvider(tmp_path / "data", runner=SizeLookupTimeoutRunner())
+    monkeypatch.setattr(busy, "executable", lambda: executable)
+
+    assert await busy.install_sizes("SampleApp") == {"required_bytes": 700, "download_bytes": 600}
+
+
+@pytest.mark.asyncio
+async def test_epic_install_sizes_still_report_a_code_without_a_record(tmp_path, monkeypatch):
+    executable = tmp_path / "legendary"
+    executable.touch(mode=0o755)
+    provider = EpicProvider(tmp_path / "data", runner=SizeLookupTimeoutRunner())
+    monkeypatch.setattr(provider, "executable", lambda: executable)
+
+    with pytest.raises(TimeoutError, match="timed out"):
+        await provider.install_sizes("SampleApp")
+
+
 @pytest.mark.asyncio
 async def test_connection_status_asks_to_reinstall_a_mismatched_legendary_build(
     tmp_path, monkeypatch

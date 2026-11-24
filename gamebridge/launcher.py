@@ -987,7 +987,15 @@ def main() -> int:
             compatibility.prepare()
         installed_file = data_directory / "config" / "legendary" / "installed.json"
         installations = json.loads(installed_file.read_text(encoding="utf-8"))
-        installation = installations[arguments.game_id]
+        installation = installations.get(arguments.game_id)
+        if not isinstance(installation, dict):
+            # A failed or interrupted install leaves a shortcut without an install
+            # record. Saying so beats repeating the game id as a KeyError.
+            _write_log(
+                root_data / "compatibility" / "logs",
+                f"launch {arguments.game_id} not installed",
+            )
+            return 4
         title = str(installation.get("title") or arguments.game_id)
         install_path = Path(str(installation["install_path"])).expanduser().resolve()
         steam_app_id = _steam_app_id(root_data, "epic", arguments.game_id)

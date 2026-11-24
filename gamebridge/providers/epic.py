@@ -28,6 +28,12 @@ EPIC_LIBRARY_TIMEOUT = 120
 # measured cutting that call off during a live download.
 EPIC_INFO_TIMEOUT = 90
 
+# Epic answers metadata requests slowly or not at all while a download saturates the
+# connection, so the size lookup for the install dialog can fail even inside a
+# generous window. The last good answer per app is kept so a second install can still
+# be started while the first one downloads.
+INSTALL_SIZE_CACHE_LIMIT = 200
+
 # Legendary unpacks native helper modules for a single CPU architecture.  When
 # the unpacked set belongs to another architecture, the interpreter reports it
 # while importing Legendary itself, before any command runs.
@@ -479,7 +485,63 @@ class EpicProvider(GameProvider):
             except OSError:
                 pass
 
+    def install_sizes_cache_path(self) -> Path:
+        return self.data_directory / "cache" / "install-sizes.json"
+
+    def cached_install_sizes(self, external_game_id: str) -> dict[str, int] | None:
+        """The last recorded sizes for this app, when they were read successfully."""
+        try:
+            payload = json.loads(self.install_sizes_cache_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        entry = payload.get(external_game_id) if isinstance(payload, dict) else None
+        if not isinstance(entry, dict):
+            return None
+        required = entry.get("required_bytes")
+        download = entry.get("download_bytes")
+        if not isinstance(required, int) or not isinstance(download, int):
+            return None
+        return {"required_bytes": required, "download_bytes": download}
+
+    def remember_install_sizes(self, external_game_id: str, sizes: dict[str, int]) -> None:
+        """Record one size answer without keeping the cache unbounded."""
+        cache_path = self.install_sizes_cache_path()
+        try:
+            payload = json.loads(cache_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        payload[external_game_id] = {
+            "required_bytes": int(sizes["required_bytes"]),
+            "download_bytes": int(sizes["download_bytes"]),
+            "checked_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        }
+        while len(payload) > INSTALL_SIZE_CACHE_LIMIT:
+            oldest = min(payload, key=lambda key: str(payload[key].get("checked_at", "")))
+            payload.pop(oldest, None)
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            staged = cache_path.with_suffix(".json.new")
+            staged.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.replace(staged, cache_path)
+        except OSError:
+            # The cache only speeds the install dialog up; losing it is not a failure.
+            pass
+
     async def install_sizes(self, external_game_id: str) -> dict[str, int]:
+        """Sizes for one app, falling back to the last recorded answer."""
+        try:
+            sizes = await self._requested_install_sizes(external_game_id)
+        except (OSError, RuntimeError):
+            cached = self.cached_install_sizes(external_game_id)
+            if cached is None:
+                raise
+            return cached
+        self.remember_install_sizes(external_game_id, sizes)
+        return sizes
+
+    async def _requested_install_sizes(self, external_game_id: str) -> dict[str, int]:
         executable = self.executable()
         if executable is None:
             raise RuntimeError("legendary.not_installed")

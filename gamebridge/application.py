@@ -1807,8 +1807,10 @@ class GameBridgeApplication:
         provider = self.providers.get("epic")
         if not isinstance(provider, EpicProvider):
             raise RuntimeError("epic.unavailable")
-        sizes = await provider.install_sizes(str(details["external_game_id"]))
-        required = sizes["required_bytes"]
+        sizes, sizes_available, sizes_reason = await self._install_sizes_or_recorded(
+            provider, str(details["external_game_id"])
+        )
+        required = int(sizes["required_bytes"])
         locations: list[dict[str, object]] = []
         for storage in storage_roots():
             root = storage.path
@@ -1818,6 +1820,7 @@ class GameBridgeApplication:
                 free_bytes = filesystem.f_bavail * filesystem.f_frsize
             except OSError:
                 continue
+            enough_space = free_bytes >= required if sizes_available else True
             is_internal = storage.internal
             is_sd = "mmcblk" in storage.source
             display_name = "storage.internal" if is_internal else str(root)
@@ -1826,7 +1829,7 @@ class GameBridgeApplication:
                 "name": display_name,
                 "path": str(install_path),
                 "free_bytes": free_bytes,
-                "enough_space": free_bytes >= required,
+                "enough_space": enough_space,
                 "kind": "internal" if is_internal else ("sd" if is_sd else "drive"),
             })
         recommended = max(
@@ -1836,9 +1839,26 @@ class GameBridgeApplication:
         )
         return {
             **sizes,
+            "sizes_available": sizes_available,
+            "sizes_reason": sizes_reason,
             "locations": locations,
             "recommended_id": recommended["id"] if recommended else None,
         }
+
+    @staticmethod
+    async def _install_sizes_or_recorded(
+        provider: EpicProvider, external_game_id: str
+    ) -> tuple[dict[str, int], bool, str]:
+        """Sizes plus whether they came from a live Epic answer.
+
+        The storage scan itself needs no network: only the size question can fail, and
+        the install dialog must still list writable locations when it does.
+        """
+        try:
+            return await provider.install_sizes(external_game_id), True, ""
+        except (OSError, RuntimeError, ValueError) as exc:
+            # Every failure here is a normalized code or fixed text, never CLI output.
+            return {"required_bytes": 0, "download_bytes": 0}, False, str(exc)[:120]
 
     @staticmethod
     def _mount_source(root: Path) -> str:
@@ -1860,11 +1880,18 @@ class GameBridgeApplication:
         if not isinstance(provider, EpicProvider):
             raise RuntimeError("epic.unavailable")
         storage = self.storage_info(path)
-        sizes = await provider.install_sizes(str(details["external_game_id"]))
+        sizes, sizes_available, sizes_reason = await self._install_sizes_or_recorded(
+            provider, str(details["external_game_id"])
+        )
+        enough_space = (
+            storage["free_bytes"] >= sizes["required_bytes"] if sizes_available else True
+        )
         return {
             **storage,
             **sizes,
-            "enough_space": storage["free_bytes"] >= sizes["required_bytes"],
+            "sizes_available": sizes_available,
+            "sizes_reason": sizes_reason,
+            "enough_space": enough_space,
         }
 
     def install_job(self, job_id: str) -> dict[str, object]:

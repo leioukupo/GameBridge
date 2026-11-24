@@ -48,6 +48,15 @@ class EpicInstallManager:
         for job_id, task in self.tasks.items():
             if not task.done() and self.jobs.get(job_id).external_game_id == external_game_id:
                 return job_id
+        # One Legendary rewrites the whole install record file when it finishes. Two
+        # downloads racing that file erase each other’s entry, which is where an
+        # "installed but no install record" game comes from. A paused job still owns a
+        # suspended writer, so it holds the slot too; a failed job stays resumable and
+        # does not.
+        for job in self.jobs.active():
+            if job.external_game_id == external_game_id or job.state == JobState.FAILED_RETRYABLE:
+                continue
+            raise ValueError("install.another_running")
         install_root = Path(base_path).expanduser().resolve()
         if not approved_install_path(install_root):
             raise ValueError("install.path_unapproved")
@@ -95,6 +104,10 @@ class EpicInstallManager:
                 self.jobs.transition(job_id, JobState.INSTALLING_LAUNCHER)
                 self.jobs.transition(job_id, JobState.WAITING_FOR_LOGIN)
                 self.jobs.transition(job_id, JobState.DOWNLOADING_GAME)
+            # Legendary rewrites the whole install record file when it finishes, so a
+            # record for another game can disappear while this download runs. The set of
+            # installations with files on disk is taken now and re-added after success.
+            recorded_before = self.provider.retained_installations()
             environment = {
                 "LANG": os.environ.get("LANG", "C.UTF-8"),
                 "LC_ALL": os.environ.get("LC_ALL", "C.UTF-8"),
@@ -129,6 +142,7 @@ class EpicInstallManager:
                 )
             if operation == "update":
                 self.provider.mark_updated(app_name)
+            self._restore_lost_installations(recorded_before)
             self.jobs.transition(job_id, JobState.VERIFYING_GAME)
             self.jobs.transition(job_id, JobState.CONFIGURING_RUNTIME)
             self.jobs.transition(job_id, JobState.CREATING_SHORTCUT)
@@ -156,6 +170,18 @@ class EpicInstallManager:
             self.processes.pop(job_id, None)
             self.tasks.pop(job_id, None)
             self._shutdown_jobs.discard(job_id)
+
+    def _restore_lost_installations(self, recorded_before: dict) -> None:
+        """Put back install records that vanished while this download was running."""
+        current = self.provider.retained_installations()
+        lost = {
+            external_id: installation
+            for external_id, installation in recorded_before.items()
+            if external_id not in current
+        }
+        if not lost:
+            return
+        self.provider.restore_retained_installations({**current, **lost})
 
     async def _stop_orphaned_install(self, executable: Path, app_name: str) -> None:
         own_processes = {process.pid for process in self.processes.values()}

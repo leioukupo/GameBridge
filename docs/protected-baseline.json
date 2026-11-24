@@ -57,7 +57,9 @@
       "test_clearing_the_bundle_cache_removes_every_architecture_bundle",
       "test_each_legendary_build_keeps_its_own_file_and_unpack_root",
       "test_legendary_executable_follows_the_running_process_architecture",
-      "test_the_launcher_architecture_survives_for_the_plugin_host"
+      "test_the_launcher_architecture_survives_for_the_plugin_host",
+      "test_epic_install_sizes_reuse_the_recorded_answer",
+      "test_epic_install_sizes_still_report_a_code_without_a_record"
     ],
     "tests/test_hoyoplay_provider.py": [
       "test_provider_captures_and_switches_exact_official_channel_profiles",
@@ -121,7 +123,16 @@
       "test_first_custom_compat_tool_install_prompts_for_one_restart",
       "test_bh3_hotfix_install_is_claimed_and_continued_by_steam",
       "test_epic_login_wait_covers_the_backend_and_leaves_a_retry_hint",
-      "test_shortcut_start_directory_comes_from_the_installed_plugin_root"
+      "test_shortcut_start_directory_comes_from_the_installed_plugin_root",
+      "test_install_dialog_keeps_working_while_epic_sizes_are_unreadable"
+    ],
+    "tests/test_install.py": [
+      "test_install_dialog_lists_storage_when_sizes_are_unreadable",
+      "test_second_epic_download_is_refused_while_one_is_running",
+      "test_a_paused_epic_download_still_holds_the_slot",
+      "test_a_failed_epic_download_does_not_hold_the_slot",
+      "test_install_records_lost_during_a_download_are_written_back",
+      "test_intact_install_records_are_left_alone"
     ]
   },
   "baselineArchiveNote": "gitCommit remains the published beta4 anchor. The beta4 release archive was lost when the workspace was re-cloned on 2026-11-24 and could not be recovered from any host, so the packaging gate pins the surviving beta.5 archive; the test device has since run the beta.6 and beta.7 archives built by this same gate and their digests are recorded in docs/verified-baseline.md."
