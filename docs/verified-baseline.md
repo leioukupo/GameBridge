@@ -120,7 +120,7 @@ Steam Deck 的真机结论需要单独记录，不得直接继承 Xbox Ally X �
 
 改动范围：只有 Epic 走客户端自带 Proton 的路线（`runtime route=client`）会额外去掉 `SteamGameId`、`SteamExe`、`SteamPipe`、`SteamLaunchId`、`SteamPID`；GameBridge 自行下载的 GE-Proton、DWProton 继续走托管 umu 入口，环境保持 beta.14 验收时的样子。Proton 脚本自身按 `SteamGameId` 匹配的每应用配置只覆盖 Valve 收录的商店应用编号，Epic 快捷方式编号在其中没有任何命中，去掉后不损失该镜像的默认翻译与 FEX 配置。设备实测该快捷方式的环境里只有 `SteamGameId` 存在，启动日志新增 `proton bootstrapper handoff removed SteamGameId`。
 
-设备实测（按发布流程生成的安装包内代码路径）：通过 Steam 自身的启动入口触发，即 `/usr/bin/steam steam://launch/<快捷方式 appid>`，客户端已在运行并转发该命令行，与在卡片上点「开始游戏」是同一条启动链。launcher 记录 `runtime route=client layer=Proton Experimental (ARM64)` 与上面的 handoff 移除行；此后 45/70/95/120/145 秒五次采样都是 `Brotato.exe` 3 个进程、wine 1 个进程，不再出现 `Assertion failed!` 对话框，用户确认掌机进入游戏画面并可正常游玩。引导用的 `steam.exe` 进程在交接后不再常驻（同一采样里 `bootstrap=0`）。本次会话退出时的 `cloud upload` 与 `exit` 记录要在游戏退出后才写入，验收时该会话仍在运行；Epic 云存档同步走 Legendary，不经过兼容层，beta.12 与 beta.14 在同一设备上已实测为 `unchanged`。
+设备实测（按发布流程生成的安装包内代码路径）：通过 Steam 自身的启动入口触发，即 `/usr/bin/steam steam://launch/<快捷方式 appid>`，客户端已在运行并转发该命令行，与在卡片上点「开始游戏」是同一条启动链。launcher 记录 `runtime route=client layer=Proton Experimental (ARM64)` 与上面的 handoff 移除行；此后 45/70/95/120/145 秒五次采样都是 `Brotato.exe` 3 个进程、wine 1 个进程，不再出现 `Assertion failed!` 对话框，用户确认掌机进入游戏画面并可正常游玩。引导用的 `steam.exe` 进程在交接后不再常驻（同一采样里 `bootstrap=0`）。同一会话在 23:42 正常退出，启动日志记录 `cloud upload … uploaded` 与 `exit 0`：存档上传这一次确实发生了（不是 beta.12/14 那样的 `unchanged`），退出码 0 说明 Steam 侧看到的是一次完整结束的游戏会话。
 
 结论：Epic 游戏从 Steam「开始游戏」进入游戏画面，在这一 aarch64 设备类别上为「已真机验收」。此前记录的架构错配（beta.12）、多余运行时容器层级（beta.13/14）与 Proton 引导器交接断言（beta.15）三个问题均已消除。
 
