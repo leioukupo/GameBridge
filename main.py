@@ -30,8 +30,28 @@ class Plugin:
         self._artwork_sync_task: asyncio.Task[dict[str, int]] | None = None
         self._artwork_catalog_task: asyncio.Task[None] | None = None
         self._artwork_requests: set[str | None] = set()
+        self._epic_cli_task: asyncio.Task[None] | None = None
         self.app.start()
         decky.logger.info("GameBridge backend ready")
+        self._epic_cli_task = asyncio.create_task(self.install_epic_cli_variants())
+
+    async def install_epic_cli_variants(self) -> None:
+        """Place the Legendary build a Steam-started game needs on this machine.
+
+        This is a one-time repair for hosts where the plugin host is emulated; when
+        the host and the operating system share an architecture it installs nothing.
+        """
+        try:
+            installed = await self.app.install_epic_cli_variants()
+        except Exception:
+            decky.logger.exception("Epic CLI install for the game client architecture failed")
+            return
+        for record in installed:
+            decky.logger.info(
+                "Epic CLI installed for the game client architecture path=%s version=%s",
+                record.get("path", ""),
+                record.get("version", ""),
+            )
 
     async def get_dashboard(self) -> dict[str, object]:
         return await self.app.dashboard()
@@ -386,6 +406,10 @@ class Plugin:
         return await self.app.cleanup_before_uninstall(delete_games)
 
     async def _unload(self) -> None:
+        if self._epic_cli_task is not None:
+            self._epic_cli_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._epic_cli_task
         if self._artwork_catalog_task is not None:
             self._artwork_catalog_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

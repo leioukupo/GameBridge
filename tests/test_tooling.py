@@ -35,7 +35,7 @@ def test_installer_verifies_and_atomically_installs(tmp_path, monkeypatch):
         hashlib.sha256(content).hexdigest(),
     )
     installer = ToolInstaller()
-    monkeypatch.setattr(installer, "legendary_release", lambda: release)
+    monkeypatch.setattr(installer, "legendary_release", lambda architecture=None: release)
     monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: Response(content))
     target = tmp_path / "tools" / "legendary"
     result = installer.install_legendary(target)
@@ -162,7 +162,7 @@ def test_download_reports_failure_once_every_route_is_down(tmp_path, monkeypatch
 def test_installer_rejects_untrusted_url(tmp_path, monkeypatch):
     installer = ToolInstaller()
     release = ToolRelease("test", "https://example.com/tool", "0" * 64)
-    monkeypatch.setattr(installer, "legendary_release", lambda: release)
+    monkeypatch.setattr(installer, "legendary_release", lambda architecture=None: release)
     with pytest.raises(ValueError, match="allowlisted"):
         installer.install_legendary(tmp_path / "legendary")
 
@@ -216,6 +216,58 @@ def test_real_download_progress_records_component_source_and_bytes(tmp_path, mon
     assert status["source"] == "official"
     assert status["downloadedBytes"] == len(content)
     assert status["progress"] == 1.0
+
+
+def test_extra_legendary_builds_are_only_needed_on_emulated_hosts(monkeypatch):
+    """A host that runs its own children natively needs one Legendary build."""
+    installer = ToolInstaller()
+    monkeypatch.setattr(ToolInstaller, "native_architecture", staticmethod(lambda: "aarch64"))
+    monkeypatch.setattr(ToolInstaller, "child_architecture", staticmethod(lambda: "x86_64"))
+    assert installer.extra_legendary_architectures() == ["aarch64"]
+    assert installer.legendary_release("aarch64") is LEGENDARY_RELEASES["aarch64"]
+
+    monkeypatch.setattr(ToolInstaller, "native_architecture", staticmethod(lambda: "x86_64"))
+    assert installer.extra_legendary_architectures() == []
+
+    monkeypatch.setattr(ToolInstaller, "native_architecture", staticmethod(lambda: "aarch64"))
+    monkeypatch.setattr(ToolInstaller, "child_architecture", staticmethod(lambda: "aarch64"))
+    assert installer.extra_legendary_architectures() == []
+
+    monkeypatch.setattr(ToolInstaller, "native_architecture", staticmethod(lambda: "arm64"))
+    monkeypatch.setattr(ToolInstaller, "child_architecture", staticmethod(lambda: "x86_64"))
+    assert installer.extra_legendary_architectures() == ["aarch64"]
+
+    monkeypatch.setattr(ToolInstaller, "native_architecture", staticmethod(lambda: "riscv64"))
+    assert installer.extra_legendary_architectures() == []
+
+
+def test_recorded_client_architecture_overrides_the_emulated_host_reading(monkeypatch):
+    """A translated plugin host cannot name the operating system build itself."""
+    installer = ToolInstaller()
+    monkeypatch.setattr(ToolInstaller, "native_architecture", staticmethod(lambda: "x86_64"))
+    monkeypatch.setattr(ToolInstaller, "child_architecture", staticmethod(lambda: "x86_64"))
+    assert installer.extra_legendary_architectures() == []
+
+    assert installer.extra_legendary_architectures("aarch64") == ["aarch64"]
+    assert installer.extra_legendary_architectures("x86_64") == []
+    assert installer.extra_legendary_architectures("riscv64") == []
+
+
+def test_pinned_architecture_installs_the_matching_release(tmp_path, monkeypatch):
+    content = b"arm64 build"
+    release = ToolRelease(
+        "test",
+        "https://github.com/legendary-gl/legendary/releases/download/test/arm64",
+        hashlib.sha256(content).hexdigest(),
+    )
+    installer = ToolInstaller()
+    monkeypatch.setattr(installer, "legendary_release", lambda architecture=None: release)
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: Response(content))
+
+    result = installer.install_legendary(tmp_path / "legendary-aarch64", "aarch64")
+
+    assert (tmp_path / "legendary-aarch64").read_bytes() == content
+    assert result["path"].endswith("legendary-aarch64")
 
 
 def test_native_architecture_follows_the_system_binary_not_the_process():

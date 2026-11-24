@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import os
+import re
 import shutil
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -40,6 +41,84 @@ def cli_failure_code(stderr: str) -> str:
     return "epic.cli_failed"
 
 
+LEGENDARY_TOOL_NAME = "legendary"
+CLIENT_ARCHITECTURE_FILE = "launch-architecture.txt"
+_ARCHITECTURE_TOKEN = re.compile(r"[a-z0-9_]{1,32}")
+
+
+def read_client_architecture(data_directory: str | Path) -> str | None:
+    """The CPU architecture the game client reported running as, once it has run.
+
+    A plugin host that is itself emulated sees its guest architecture everywhere
+    inside that translation tree, so it cannot name the operating system build the
+    Steam-started launcher needs. The launcher records it here instead.
+    """
+    try:
+        value = (Path(data_directory) / CLIENT_ARCHITECTURE_FILE).read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        return None
+    value = value.strip().lower()
+    return value if _ARCHITECTURE_TOKEN.fullmatch(value) else None
+
+
+def record_client_architecture(data_directory: str | Path, architecture: str) -> None:
+    """Store the launcher architecture next to the Legendary builds it selects."""
+    value = architecture.strip().lower()
+    if not _ARCHITECTURE_TOKEN.fullmatch(value):
+        return
+    directory = Path(data_directory)
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        staged = directory / f".{CLIENT_ARCHITECTURE_FILE}.new"
+        staged.write_text(f"{value}\n", encoding="utf-8")
+        os.replace(staged, directory / CLIENT_ARCHITECTURE_FILE)
+    except OSError:
+        # A read-only data mount must not stop a game from starting.
+        return
+
+
+def legendary_tool_path(tools_directory: str | Path, architecture: str | None = None) -> Path:
+    """Where the Legendary build for one CPU architecture is kept.
+
+    The plugin host keeps the unlabelled build. A build for another architecture,
+    such as the one a Steam-started game runs when the host itself is emulated,
+    sits next to it under its own name.
+    """
+    tools = Path(tools_directory)
+    if architecture is None:
+        return tools / LEGENDARY_TOOL_NAME
+    return tools / f"{LEGENDARY_TOOL_NAME}-{architecture}"
+
+
+def legendary_executable_for(data_directory: str | Path, architecture: str) -> tuple[Path, str | None]:
+    """The Legendary build a process of this architecture can run.
+
+    A machine whose game client runs in the same mode as the plugin host keeps one
+    unlabelled build, so a missing per-architecture build falls back to it.
+    """
+    provider_data = Path(data_directory)
+    variant = legendary_tool_path(provider_data / "tools", architecture)
+    if variant.is_file():
+        return variant, architecture
+    return legendary_tool_path(provider_data / "tools"), None
+
+
+def legendary_variant_cache_root(data_directory: str | Path) -> Path:
+    """Parent of the unpack roots used by secondary Legendary builds."""
+    return Path(data_directory) / "cache" / "variants"
+
+
+def legendary_cache_directory(data_directory: str | Path, architecture: str | None = None) -> Path:
+    """Unpack root for one Legendary build.
+
+    Legendary unpacks native helper modules for a single architecture into this
+    directory, so two builds on one machine must not share it.
+    """
+    if architecture is None:
+        return Path(data_directory) / "cache"
+    return legendary_variant_cache_root(data_directory) / architecture
+
+
 class EpicProvider(GameProvider):
     provider_id = "epic"
     display_name = "Epic Games"
@@ -63,7 +142,7 @@ class EpicProvider(GameProvider):
 
     def executable(self) -> Path | None:
         candidates = [
-            self.data_directory / "tools" / "legendary",
+            legendary_tool_path(self.data_directory / "tools"),
             shutil.which("legendary"),
             os.path.expanduser("~/.local/bin/legendary"),
             "/usr/local/bin/legendary",
@@ -79,7 +158,7 @@ class EpicProvider(GameProvider):
 
     def environment(self) -> dict[str, str]:
         config = self.data_directory / "config"
-        cache = self.data_directory / "cache"
+        cache = legendary_cache_directory(self.data_directory)
         config.mkdir(parents=True, exist_ok=True)
         cache.mkdir(parents=True, exist_ok=True)
         return {
@@ -111,12 +190,14 @@ class EpicProvider(GameProvider):
         )
 
     def clear_cli_bundle_cache(self) -> None:
-        """Drop the dependency bundle Legendary extracts for its own architecture.
+        """Drop every dependency bundle Legendary has unpacked.
 
-        Legendary unpacks its helpers into one fixed cache directory, so a build
-        installed for a different architecture must not be reused.
+        Each build unpacks its helpers into its own cache directory, so a build
+        installed for a different architecture must not be reused and a reinstall
+        clears the bundles for every build on the machine.
         """
         shutil.rmtree(self.data_directory / "cache" / "legendary" / "vendored", ignore_errors=True)
+        shutil.rmtree(legendary_variant_cache_root(self.data_directory), ignore_errors=True)
 
     def retained_installations(self) -> JsonObject:
         installed_file = self.data_directory / "config" / "legendary" / "installed.json"

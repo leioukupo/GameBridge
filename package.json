@@ -1,6 +1,6 @@
 {
   "name": "gamebridge",
-  "version": "0.19.0-beta.11",
+  "version": "0.19.0-beta.12",
   "description": "Unified third-party game library for SteamOS",
   "type": "module",
   "scripts": {

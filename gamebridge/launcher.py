@@ -23,6 +23,11 @@ if os.fspath(PLUGIN_ROOT) not in sys.path:
 from gamebridge.compatibility import CompatibilityManager  # noqa: E402, I001
 from gamebridge.cloud_saves import EpicCloudSaveManager  # noqa: E402, I001
 from gamebridge.play_history import merge_history_store  # noqa: E402, I001
+from gamebridge.providers.epic import (  # noqa: E402, I001
+    legendary_cache_directory,
+    legendary_executable_for,
+    record_client_architecture,
+)
 from gamebridge.providers.hoyoplay import (  # noqa: E402, I001
     HOYOPLAY_GLOBAL,
     MIHOYO_CN,
@@ -34,6 +39,7 @@ from gamebridge.storage import (  # noqa: E402, I001
     ensure_wine_storage_drive,
     steam_library_paths,
 )
+from gamebridge.tooling import ToolInstaller  # noqa: E402, I001
 
 
 LANGUAGE_ENVIRONMENTS = {
@@ -214,6 +220,30 @@ def _record_last_played(root_data: Path, provider_id: str, game_id: str) -> None
         # A read-only data mount must not turn a successful game session into a
         # launcher failure. Steam playtime remains authoritative.
         pass
+
+
+PLAN_FAILURE_REASONS = (
+    ("cannot load native module", "cli_architecture_mismatch"),
+    ("no space left on device", "disk_full"),
+    ("permission denied", "permission_denied"),
+    ("game not installed", "game_not_installed"),
+    ("not logged in", "account_signed_out"),
+)
+
+
+def _plan_failure_reason(stderr: str) -> str:
+    """Name why Legendary produced no plan without repeating its output.
+
+    A failing Legendary run prints the resolved launch command, and that command
+    carries an Epic exchange code. Only the fixed tokens above, or the name of the
+    raised exception, are safe to persist.
+    """
+    lowered = stderr.lower()
+    for marker, reason in PLAN_FAILURE_REASONS:
+        if marker in lowered:
+            return reason
+    match = re.search(r"\b([A-Z][A-Za-z0-9_]*(?:Error|Exception))\b", stderr)
+    return match.group(1) if match else "unspecified"
 
 
 def _legendary_launch_spec(payload: object) -> tuple[list[str], Path, dict[str, str], list[str] | None, bool]:
@@ -856,9 +886,15 @@ def main() -> int:
         root_data, arguments.provider, arguments.game_id, arguments.language
     )
     data_directory = root_data / "providers" / "epic"
-    legendary = data_directory / "tools" / "legendary"
+    cli_architecture = ToolInstaller.child_architecture()
+    # The plugin host cannot see this architecture from inside its own translation
+    # tree, so it reads it back from here before adding a matching Legendary build.
+    record_client_architecture(data_directory, cli_architecture)
+    legendary, unpack_architecture = legendary_executable_for(data_directory, cli_architecture)
     if not legendary.is_file():
         return 3
+    unpack_root = legendary_cache_directory(data_directory, unpack_architecture)
+    unpack_root.mkdir(parents=True, exist_ok=True)
     compatibility = CompatibilityManager(root_data / "compatibility")
     try:
         if not compatibility.status()["ready"]:
@@ -883,7 +919,7 @@ def main() -> int:
         {
             "HOME": os.fspath(data_directory),
             "XDG_CONFIG_HOME": os.fspath(data_directory / "config"),
-            "XDG_CACHE_HOME": os.fspath(data_directory / "cache"),
+            "XDG_CACHE_HOME": os.fspath(unpack_root),
             "LEGENDARY_CONFIG_PATH": os.fspath(data_directory / "config" / "legendary"),
             "WINEPREFIX": os.fspath(prefix),
             "GAMEID": compatibility.umu_id(arguments.game_id, title),
@@ -928,7 +964,7 @@ def main() -> int:
     _write_log(
         root_data / "compatibility" / "logs",
         f"launch {arguments.game_id} appid={steam_app_id} with {runtime_name} "
-        f"({environment['GAMEID']})",
+        f"({environment['GAMEID']}) cli={legendary.name} arch={unpack_architecture or 'host'}",
     )
     command = [
             os.fspath(legendary),
@@ -956,7 +992,11 @@ def main() -> int:
         text=True,
     )
     if plan_result.returncode:
-        _write_log(root_data / "compatibility" / "logs", f"launch plan failed {plan_result.returncode}")
+        _write_log(
+            root_data / "compatibility" / "logs",
+            f"launch plan failed {plan_result.returncode} "
+            f"cli={legendary.name} reason={_plan_failure_reason(plan_result.stderr)}",
+        )
         return plan_result.returncode
     try:
         launch_command, working_directory, launch_environment, pre_launch, pre_launch_wait = (

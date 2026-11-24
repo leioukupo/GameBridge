@@ -40,6 +40,14 @@ class ToolRelease:
     gateway_url: str | None = None
 
 
+ARCHITECTURE_ALIASES = {"amd64": "x86_64", "arm64": "aarch64"}
+
+
+def normalize_architecture(machine: str) -> str:
+    lowered = machine.strip().lower()
+    return ARCHITECTURE_ALIASES.get(lowered, lowered)
+
+
 LEGENDARY_RELEASES = {
     "x86_64": ToolRelease(
         "0.21.0",
@@ -161,19 +169,39 @@ class ToolInstaller:
             except (OSError, subprocess.SubprocessError):
                 machine = ""
         if not machine:
-            machine = platform.machine().lower()
-        aliases = {"amd64": "x86_64", "arm64": "aarch64"}
-        return aliases.get(machine, machine)
+            machine = platform.machine()
+        return normalize_architecture(machine)
 
-    def legendary_release(self) -> ToolRelease:
-        architecture = self.child_architecture()
+    def extra_legendary_architectures(self, client_architecture: str | None = None) -> list[str]:
+        """Legendary builds a Steam-started game needs beyond this host's own.
+
+        The plugin host installs the build its own child processes run as. On an
+        emulated host that build is x86_64, while a game started from Steam runs
+        outside the emulation and needs the operating system build. Each build
+        unpacks native helper modules for its own architecture, so they cannot
+        share one file or one unpack directory.
+
+        An emulated host reports its guest architecture for the system binaries it
+        can read, so the launcher architecture recorded by a real game start wins
+        over this host's own reading of the system.
+        """
+        candidate = client_architecture or self.native_architecture()
+        needed = normalize_architecture(candidate)
+        if needed == self.child_architecture() or needed not in LEGENDARY_RELEASES:
+            return []
+        return [needed]
+
+    def legendary_release(self, architecture: str | None = None) -> ToolRelease:
+        resolved = architecture or self.child_architecture()
         try:
-            return LEGENDARY_RELEASES[architecture]
+            return LEGENDARY_RELEASES[resolved]
         except KeyError as exc:
-            raise RuntimeError(f"unsupported architecture: {architecture}") from exc
+            raise RuntimeError(f"unsupported architecture: {resolved}") from exc
 
-    def install_legendary(self, target: str | Path) -> dict[str, str]:
-        release = self.legendary_release()
+    def install_legendary(
+        self, target: str | Path, architecture: str | None = None
+    ) -> dict[str, str]:
+        release = self.legendary_release(architecture)
         target_path = Path(target).expanduser().resolve()
         target_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path = self._download(release, target_path.parent, ".legendary-")

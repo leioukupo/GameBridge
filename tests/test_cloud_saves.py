@@ -103,6 +103,33 @@ def test_missing_previously_synced_file_blocks_upload(tmp_path):
     assert commands == ["download"]
 
 
+def test_cloud_saves_use_the_legendary_build_matching_the_process(tmp_path, monkeypatch):
+    """Cloud sync runs in both process trees, so it follows the same architecture rule."""
+    from gamebridge.tooling import ToolInstaller
+
+    manager = EpicCloudSaveManager(tmp_path)
+    tools = tmp_path / "providers" / "epic" / "tools"
+    tools.mkdir(parents=True)
+    (tools / "legendary").write_bytes(b"x86_64 build")
+    (tools / "legendary-aarch64").write_bytes(b"aarch64 build")
+    monkeypatch.setattr(ToolInstaller, "child_architecture", staticmethod(lambda: "aarch64"))
+
+    executable, unpack_architecture = manager.cli()
+    environment = manager._environment(unpack_architecture)
+
+    assert executable.name == "legendary-aarch64"
+    assert Path(environment["XDG_CACHE_HOME"]) == (
+        tmp_path / "providers" / "epic" / "cache" / "variants" / "aarch64"
+    )
+
+    (tools / "legendary-aarch64").unlink()
+    executable, unpack_architecture = manager.cli()
+    environment = manager._environment(unpack_architecture)
+
+    assert executable.name == "legendary"
+    assert Path(environment["XDG_CACHE_HOME"]) == tmp_path / "providers" / "epic" / "cache"
+
+
 def test_nonempty_local_save_uploads_and_creates_backup(tmp_path):
     cloud = manager(tmp_path, "{AppData}/Hogwarts/Saves/{EpicID}")
     save_dir = cloud.resolve_save_path(GAME_ID)

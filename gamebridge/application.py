@@ -35,6 +35,7 @@ from .play_history import (
 )
 from .provider import ProviderRegistry
 from .providers import HOYOPLAY_GLOBAL, MIHOYO_CN, EpicProvider, HoYoPlayProvider
+from .providers.epic import legendary_tool_path, read_client_architecture
 from .runtime import UmuRuntime
 from .steam_artwork import SteamArtworkResolver
 from .steam_browser import SteamBrowserAuthorization
@@ -411,9 +412,45 @@ class GameBridgeApplication:
         provider = self.providers.get(provider_id)
         if not isinstance(provider, EpicProvider):
             raise RuntimeError("epic.unavailable")
-        target = provider.data_directory / "tools" / "legendary"
+        target = legendary_tool_path(provider.data_directory / "tools")
         provider.clear_cli_bundle_cache()
-        return await asyncio.to_thread(self.tool_installer.install_legendary, target)
+        result = await asyncio.to_thread(self.tool_installer.install_legendary, target)
+        await self.install_epic_cli_variants()
+        return result
+
+    def missing_epic_cli_variants(self) -> list[tuple[str, Path]]:
+        provider = self.providers.get("epic")
+        if not isinstance(provider, EpicProvider) or provider.executable() is None:
+            return []
+        tools_directory = provider.data_directory / "tools"
+        missing: list[tuple[str, Path]] = []
+        architectures = self.tool_installer.extra_legendary_architectures(
+            read_client_architecture(provider.data_directory)
+        )
+        for architecture in architectures:
+            target = legendary_tool_path(tools_directory, architecture)
+            if not target.is_file():
+                missing.append((architecture, target))
+        return missing
+
+    async def install_epic_cli_variants(self) -> list[dict[str, str]]:
+        """Add the Legendary builds a Steam-started game needs on this machine.
+
+        A game client started by Steam runs outside an emulated plugin host, so an
+        x86_64 host on an aarch64 machine needs the operating system build beside
+        the one its own commands already use. Tool installs already own the download
+        progress the interface shows, so this stays quiet while one of them runs.
+        """
+        if self.tool_installer.progress_status()["active"]:
+            return []
+        installed: list[dict[str, str]] = []
+        for architecture, target in self.missing_epic_cli_variants():
+            installed.append(
+                await asyncio.to_thread(
+                    self.tool_installer.install_legendary, target, architecture
+                )
+            )
+        return installed
 
     async def authenticate_epic(self, authorization_code: str) -> dict[str, object]:
         provider = self.providers.get("epic")

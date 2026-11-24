@@ -36,7 +36,8 @@
       "test_destructive_cleanup_removes_hoyoplay_prefixes_but_keeps_external_games"
     ],
     "tests/test_cloud_saves.py": [
-      "test_nonempty_local_save_uploads_and_creates_backup"
+      "test_nonempty_local_save_uploads_and_creates_backup",
+      "test_cloud_saves_use_the_legendary_build_matching_the_process"
     ],
     "tests/test_compatibility.py": [
       "test_compatibility_finds_proton_in_external_steam_library",
@@ -52,7 +53,11 @@
       "test_clearing_the_cli_bundle_cache_keeps_account_and_install_metadata",
       "test_install_sizes_reports_a_stable_code_when_legendary_cannot_run",
       "test_connection_status_asks_to_reinstall_a_mismatched_legendary_build",
-      "test_install_size_lookup_uses_a_bounded_longer_window"
+      "test_install_size_lookup_uses_a_bounded_longer_window",
+      "test_clearing_the_bundle_cache_removes_every_architecture_bundle",
+      "test_each_legendary_build_keeps_its_own_file_and_unpack_root",
+      "test_legendary_executable_follows_the_running_process_architecture",
+      "test_the_launcher_architecture_survives_for_the_plugin_host"
     ],
     "tests/test_hoyoplay_provider.py": [
       "test_provider_captures_and_switches_exact_official_channel_profiles",
@@ -67,7 +72,8 @@
       "test_each_global_game_uses_an_isolated_compatibility_environment",
       "test_bh3_global_prefers_proton_hotfix_from_any_steam_library",
       "test_bh3_global_requests_official_hotfix_and_waits_for_it",
-      "test_hoyoplay_game_drive_maps_the_external_root_containing_launcher"
+      "test_hoyoplay_game_drive_maps_the_external_root_containing_launcher",
+      "test_plan_failure_reason_never_repeats_authentication_material"
     ],
     "tests/test_library.py": [
       "test_global_genshin_shortcut_uses_native_region_router",
@@ -98,7 +104,10 @@
       "test_download_falls_back_to_the_official_route_when_the_gateway_is_down",
       "test_download_rejects_a_gateway_payload_that_fails_the_pinned_digest",
       "test_download_reports_failure_once_every_route_is_down",
-      "test_native_architecture_follows_the_system_binary_not_the_process"
+      "test_native_architecture_follows_the_system_binary_not_the_process",
+      "test_extra_legendary_builds_are_only_needed_on_emulated_hosts",
+      "test_pinned_architecture_installs_the_matching_release",
+      "test_recorded_client_architecture_overrides_the_emulated_host_reading"
     ],
     "tests/test_ui_source_contract.py": [
       "test_epic_sync_refreshes_the_library_tab_cache_and_count",

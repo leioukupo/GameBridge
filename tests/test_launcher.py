@@ -20,6 +20,7 @@ from gamebridge.launcher import (
     _launch_modifiers,
     _legendary_launch_spec,
     _official_client_command,
+    _plan_failure_reason,
     _prepare_isolated_steam_home,
     _record_last_played,
     _recover_embedded_lsfg,
@@ -62,6 +63,23 @@ def test_legendary_json_plan_becomes_a_structured_waited_command(tmp_path):
     assert environment == {"WINEPREFIX": str(tmp_path / "prefix")}
     assert pre_launch == ["/usr/bin/true", "--check"]
     assert pre_launch_wait is True
+
+
+def test_plan_failure_reason_never_repeats_authentication_material():
+    stderr = (
+        "ERROR Launching the game failed: umu-run /games/Brotato.exe "
+        "-AUTH_LOGIN=unused -AUTH_PASSWORD=exchange-code -AUTHMODE=0"
+    )
+
+    assert _plan_failure_reason(stderr) == "unspecified"
+
+    assert (
+        _plan_failure_reason(
+            "ImportError: Cannot load native module 'Cryptodome.Util._cpuid_c'"
+        )
+        == "cli_architecture_mismatch"
+    )
+    assert _plan_failure_reason("ValueError: bad plan") == "ValueError"
 
 
 def test_legendary_json_plan_rejects_string_commands(tmp_path):

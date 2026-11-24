@@ -4,7 +4,12 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from gamebridge.process import ProcessError, ProcessResult
-from gamebridge.providers.epic import EpicProvider
+from gamebridge.providers.epic import (
+    EpicProvider,
+    legendary_cache_directory,
+    legendary_executable_for,
+    legendary_tool_path,
+)
 
 
 class FakeRunner:
@@ -101,6 +106,71 @@ def test_clearing_the_cli_bundle_cache_keeps_account_and_install_metadata(tmp_pa
 
     assert not (tmp_path / "cache" / "legendary" / "vendored").exists()
     assert (installed / "installed.json").is_file()
+
+
+def test_clearing_the_bundle_cache_removes_every_architecture_bundle(tmp_path):
+    provider = EpicProvider(tmp_path)
+    host_bundle = tmp_path / "cache" / "legendary" / "vendored"
+    client_bundle = tmp_path / "cache" / "variants" / "aarch64" / "legendary" / "vendored"
+    host_bundle.mkdir(parents=True)
+    client_bundle.mkdir(parents=True)
+    (host_bundle / "_cpuid_c.abi3.so").write_bytes(b"x86_64 bundle")
+    (client_bundle / "_cpuid_c.abi3.so").write_bytes(b"aarch64 bundle")
+
+    provider.clear_cli_bundle_cache()
+
+    assert not host_bundle.exists()
+    assert not client_bundle.exists()
+
+
+def test_each_legendary_build_keeps_its_own_file_and_unpack_root(tmp_path):
+    assert legendary_tool_path(tmp_path / "tools") == tmp_path / "tools" / "legendary"
+    assert (
+        legendary_tool_path(tmp_path / "tools", "aarch64")
+        == tmp_path / "tools" / "legendary-aarch64"
+    )
+    assert legendary_cache_directory(tmp_path) == tmp_path / "cache"
+    assert (
+        legendary_cache_directory(tmp_path, "aarch64")
+        == tmp_path / "cache" / "variants" / "aarch64"
+    )
+
+
+def test_the_launcher_architecture_survives_for_the_plugin_host(tmp_path):
+    from gamebridge.providers.epic import (
+        record_client_architecture,
+        read_client_architecture,
+    )
+
+    assert read_client_architecture(tmp_path) is None
+
+    record_client_architecture(tmp_path, "aarch64")
+    assert read_client_architecture(tmp_path) == "aarch64"
+
+    (tmp_path / "launch-architecture.txt").write_text("../../etc/passwd", encoding="utf-8")
+    assert read_client_architecture(tmp_path) is None
+
+    record_client_architecture(tmp_path, "not a architecture token!")
+    assert read_client_architecture(tmp_path) is None
+
+
+def test_legendary_executable_follows_the_running_process_architecture(tmp_path):
+    """A Steam-started game uses the native build, not the emulated host build."""
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    (tools / "legendary").write_bytes(b"x86_64 build")
+    (tools / "legendary-aarch64").write_bytes(b"aarch64 build")
+
+    selected, unpack_architecture = legendary_executable_for(tmp_path, "aarch64")
+
+    assert selected.name == "legendary-aarch64"
+    assert unpack_architecture == "aarch64"
+
+    (tools / "legendary-aarch64").unlink()
+    selected, unpack_architecture = legendary_executable_for(tmp_path, "aarch64")
+
+    assert selected.name == "legendary"
+    assert unpack_architecture is None
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from .providers.epic import legendary_cache_directory, legendary_executable_for
+from .tooling import ToolInstaller
+
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
 _MANIFEST = ".gamebridge-cloud-manifest.json"
@@ -61,10 +64,18 @@ class EpicCloudSaveManager:
     def __init__(self, root_data: str | Path) -> None:
         self.root_data = Path(root_data)
         self.provider_data = self.root_data / "providers" / "epic"
-        self.legendary = self.provider_data / "tools" / "legendary"
         self.legendary_config = self.provider_data / "config" / "legendary"
         self.prefix_root = self.root_data / "compatibility" / "prefixes" / "epic"
         self.state_root = self.root_data / "cloud-saves" / "epic"
+
+    def cli(self) -> tuple[Path, str | None]:
+        """Legendary build matching the process that runs it, and its unpack arch.
+
+        This adapter is shared by the plugin host and the Steam-started launcher.
+        On an emulated host those run different architectures, and Legendary
+        unpacks native helper modules per architecture.
+        """
+        return legendary_executable_for(self.provider_data, ToolInstaller.child_architecture())
 
     def settings(self) -> dict[str, bool]:
         path = self.root_data / "cloud-saves" / "settings.json"
@@ -281,10 +292,11 @@ class EpicCloudSaveManager:
     def _legendary_sync(
         self, game_id: str, local_path: Path, direction: Literal["download", "upload"]
     ) -> str:
-        if not self.legendary.is_file():
+        executable, unpack_architecture = self.cli()
+        if not executable.is_file():
             raise RuntimeError("legendary.not_installed")
         command = [
-            os.fspath(self.legendary),
+            os.fspath(executable),
             "-y",
             "sync-saves",
             game_id,
@@ -296,7 +308,7 @@ class EpicCloudSaveManager:
         try:
             result = subprocess.run(
                 command,
-                env=self._environment(),
+                env=self._environment(unpack_architecture),
                 check=False,
                 capture_output=True,
                 text=True,
@@ -311,12 +323,13 @@ class EpicCloudSaveManager:
         return f"{result.stdout}\n{result.stderr}"
 
     def _cloud_timestamp(self, game_id: str) -> int:
-        if not self.legendary.is_file():
+        executable, unpack_architecture = self.cli()
+        if not executable.is_file():
             return 0
         try:
             result = subprocess.run(
-                [os.fspath(self.legendary), "list-saves", game_id],
-                env=self._environment(),
+                [os.fspath(executable), "list-saves", game_id],
+                env=self._environment(unpack_architecture),
                 check=False,
                 capture_output=True,
                 text=True,
@@ -385,11 +398,13 @@ class EpicCloudSaveManager:
         value = payload.get("account_id")
         return value if isinstance(value, str) and _SAFE_ID.fullmatch(value) else None
 
-    def _environment(self) -> dict[str, str]:
+    def _environment(self, unpack_architecture: str | None = None) -> dict[str, str]:
         return {
             "HOME": os.fspath(self.provider_data),
             "XDG_CONFIG_HOME": os.fspath(self.provider_data / "config"),
-            "XDG_CACHE_HOME": os.fspath(self.provider_data / "cache"),
+            "XDG_CACHE_HOME": os.fspath(
+                legendary_cache_directory(self.provider_data, unpack_architecture)
+            ),
             "LEGENDARY_CONFIG_PATH": os.fspath(self.legendary_config),
             "PATH": "/usr/local/bin:/usr/bin:/bin",
             # Legendary compares naive cloud datetimes with local file mtimes.
