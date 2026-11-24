@@ -5,6 +5,7 @@ import fcntl
 import os
 import platform
 import shutil
+import subprocess
 import ssl
 import tarfile
 import tempfile
@@ -106,10 +107,36 @@ class ToolInstaller:
         with self._progress_lock:
             self._progress.update(values)
 
-    def legendary_release(self) -> ToolRelease:
-        architecture = platform.machine().lower()
+    @staticmethod
+    def child_architecture() -> str:
+        """Architecture that downloaded command-line tools actually run as.
+
+        An x86_64 plugin host can be emulated (FEX on an aarch64 SteamOS
+        build). Emulation does not extend to the x86_64 Legendary build's own
+        native helper modules, so the command-line tool has to match the
+        machine under ``/bin/uname`` instead of the host process.
+        """
+        uname = shutil.which("uname")
+        machine = ""
+        if uname is not None:
+            try:
+                completed = subprocess.run(  # noqa: S603 - fixed helper path from PATH
+                    [uname, "-m"],
+                    capture_output=True,
+                    check=True,
+                    text=True,
+                    timeout=5,
+                )
+                machine = completed.stdout.strip().lower()
+            except (OSError, subprocess.SubprocessError):
+                machine = ""
+        if not machine:
+            machine = platform.machine().lower()
         aliases = {"amd64": "x86_64", "arm64": "aarch64"}
-        architecture = aliases.get(architecture, architecture)
+        return aliases.get(machine, machine)
+
+    def legendary_release(self) -> ToolRelease:
+        architecture = self.child_architecture()
         try:
             return LEGENDARY_RELEASES[architecture]
         except KeyError as exc:
@@ -227,8 +254,34 @@ class ToolInstaller:
         max_size: int = MAX_TOOL_SIZE,
         algorithm: str = "sha256",
     ) -> Path:
-        url = release.gateway_url or release.url
-        self._validate_url(url)
+        routes = [url for url in (release.gateway_url, release.url) if url]
+        for url in routes:
+            self._validate_url(url)
+        # The regional gateway can be temporarily unavailable while the
+        # upstream release asset is healthy. Every managed component keeps its
+        # official URL as a second route, so a gateway outage cannot block an
+        # Epic sign-in or a compatibility runtime install. Both routes are
+        # checked against the same pinned digest.
+        last_error: Exception = RuntimeError(f"no download route for {release.component}")
+        for url in routes:
+            try:
+                return self._download_from(
+                    url, release, directory, prefix, max_size=max_size, algorithm=algorithm
+                )
+            except (OSError, RuntimeError) as exc:
+                last_error = exc
+        raise last_error
+
+    def _download_from(
+        self,
+        url: str,
+        release: ToolRelease,
+        directory: Path,
+        prefix: str,
+        *,
+        max_size: int,
+        algorithm: str,
+    ) -> Path:
         self.set_progress(
             active=True,
             component=release.component or release.version,
@@ -238,7 +291,7 @@ class ToolInstaller:
             downloadedBytes=0,
             totalBytes=None,
         )
-        request = urllib.request.Request(  # noqa: S310 -- URL is allowlisted above
+        request = urllib.request.Request(  # noqa: S310 -- URL is allowlisted by the caller
             url,
             headers={"User-Agent": "GameBridge/0.18 (+https://github.com/Open-Wine-Components)"},
         )

@@ -72,6 +72,38 @@ async def connected_status():
 
 
 @pytest.mark.asyncio
+async def test_epic_library_uses_a_bounded_longer_window(tmp_path, monkeypatch):
+    from gamebridge.providers.epic import EPIC_LIBRARY_OUTPUT_LIMIT, EPIC_LIBRARY_TIMEOUT
+
+    executable = tmp_path / "legendary"
+    executable.touch(mode=0o755)
+    runner = RecordingRunner()
+    provider = EpicProvider(tmp_path / "data", runner=runner)
+    monkeypatch.setattr(provider, "executable", lambda: executable)
+    with pytest.raises(ValueError, match="epic.library_invalid"):
+        await provider.library()
+
+    assert runner.kwargs["output_limit"] == EPIC_LIBRARY_OUTPUT_LIMIT
+    assert runner.kwargs["timeout"] == EPIC_LIBRARY_TIMEOUT
+    assert EPIC_LIBRARY_TIMEOUT > 30
+
+
+def test_clearing_the_cli_bundle_cache_keeps_account_and_install_metadata(tmp_path):
+    provider = EpicProvider(tmp_path)
+    vendored = tmp_path / "cache" / "legendary" / "vendored" / "Cryptodome"
+    vendored.mkdir(parents=True)
+    (vendored / "_cpuid_c.abi3.so").write_bytes(b"x86_64 bundle")
+    installed = tmp_path / "config" / "legendary"
+    installed.mkdir(parents=True)
+    (installed / "installed.json").write_text("{}", encoding="utf-8")
+
+    provider.clear_cli_bundle_cache()
+
+    assert not (tmp_path / "cache" / "legendary" / "vendored").exists()
+    assert (installed / "installed.json").is_file()
+
+
+@pytest.mark.asyncio
 async def test_epic_status_and_library(tmp_path, monkeypatch):
     executable = tmp_path / "legendary"
     executable.touch(mode=0o755)

@@ -41,6 +41,22 @@ async def test_process_runner_redacts_sensitive_arguments_and_output():
 
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_process_runner_allows_a_longer_window_for_one_bounded_command():
+    runner = SafeProcessRunner(timeout=0.2)
+    with pytest.raises(TimeoutError, match="after 0.2s"):
+        await runner.run(sys.executable, "-c", "import time; time.sleep(3); print('late')")
+
+    result = await runner.run(
+        sys.executable,
+        "-c",
+        "import time; time.sleep(0.4); print('slow but allowed')",
+        timeout=5,
+    )
+    assert result.stdout.strip() == "slow but allowed"
+
+
+@pytest.mark.asyncio
 async def test_process_runner_allows_a_larger_limit_for_one_bounded_command():
     runner = SafeProcessRunner(output_limit=4)
     with pytest.raises(RuntimeError, match="command output exceeded safety limit"):

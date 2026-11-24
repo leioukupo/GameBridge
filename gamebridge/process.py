@@ -36,6 +36,7 @@ class SafeProcessRunner:
         check: bool = True,
         sensitive_arguments: frozenset[int] = frozenset(),
         output_limit: int | None = None,
+        timeout: float | None = None,
     ) -> ProcessResult:
         executable_path = Path(executable).expanduser().resolve()  # noqa: ASYNC240
         if not executable_path.is_file() or not os.access(executable_path, os.X_OK):
@@ -47,6 +48,9 @@ class SafeProcessRunner:
             "PATH": "/usr/local/bin:/usr/bin:/bin",
             **(environment or {}),
         }
+        effective_timeout = self.timeout if timeout is None else timeout
+        if effective_timeout <= 0:
+            raise ValueError("timeout must be positive")
         process = await asyncio.create_subprocess_exec(
             *argv,
             stdout=asyncio.subprocess.PIPE,
@@ -55,12 +59,12 @@ class SafeProcessRunner:
         )
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(), timeout=self.timeout
+                process.communicate(), timeout=effective_timeout
             )
         except TimeoutError:
             process.kill()
             await process.wait()
-            raise TimeoutError(f"command timed out after {self.timeout:g}s") from None
+            raise TimeoutError(f"command timed out after {effective_timeout:g}s") from None
         effective_output_limit = self.output_limit if output_limit is None else output_limit
         if effective_output_limit <= 0:
             raise ValueError("output_limit must be positive")

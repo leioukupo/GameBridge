@@ -17,6 +17,10 @@ from ..provider import GameProvider
 
 
 EPIC_LIBRARY_OUTPUT_LIMIT = 128 * 1024 * 1024
+# A large Epic account needs one metadata pass per owned app: measured about 20
+# seconds warm and longer on a cold Legendary start. This stays inside the
+# library sync window the interface already allows.
+EPIC_LIBRARY_TIMEOUT = 120
 
 
 class EpicProvider(GameProvider):
@@ -88,6 +92,14 @@ class EpicProvider(GameProvider):
             and isinstance(executable, str)
             and (Path(install_path) / executable).is_file()
         )
+
+    def clear_cli_bundle_cache(self) -> None:
+        """Drop the dependency bundle Legendary extracts for its own architecture.
+
+        Legendary unpacks its helpers into one fixed cache directory, so a build
+        installed for a different architecture must not be reused.
+        """
+        shutil.rmtree(self.data_directory / "cache" / "legendary" / "vendored", ignore_errors=True)
 
     def retained_installations(self) -> JsonObject:
         installed_file = self.data_directory / "config" / "legendary" / "installed.json"
@@ -199,6 +211,7 @@ class EpicProvider(GameProvider):
                 "--json",
                 environment=self.environment(),
                 output_limit=EPIC_LIBRARY_OUTPUT_LIMIT,
+                timeout=EPIC_LIBRARY_TIMEOUT,
             )
         except (ProcessError, OSError, RuntimeError) as exc:
             raise RuntimeError("epic.sync_failed") from exc

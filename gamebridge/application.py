@@ -407,6 +407,7 @@ class GameBridgeApplication:
         if not isinstance(provider, EpicProvider):
             raise RuntimeError("epic.unavailable")
         target = provider.data_directory / "tools" / "legendary"
+        provider.clear_cli_bundle_cache()
         return await asyncio.to_thread(self.tool_installer.install_legendary, target)
 
     async def authenticate_epic(self, authorization_code: str) -> dict[str, object]:

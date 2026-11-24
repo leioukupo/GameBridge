@@ -44,7 +44,10 @@
     "tests/test_tooling.py": [
       "test_x86_managed_components_use_the_single_region_gateway",
       "test_download_source_is_derived_after_the_gateway_redirect",
-      "test_real_download_progress_records_component_source_and_bytes"
+      "test_real_download_progress_records_component_source_and_bytes",
+      "test_download_falls_back_to_the_official_route_when_the_gateway_is_down",
+      "test_download_rejects_a_gateway_payload_that_fails_the_pinned_digest",
+      "test_download_reports_failure_once_every_route_is_down"
     ],
     "tests/test_launcher.py": [
       "test_global_hoyoplay_never_reuses_cn_steam_prefix",
@@ -72,10 +75,13 @@
     ],
     "tests/test_epic_provider.py": [
       "test_epic_status_and_library",
-      "test_epic_uninstall_uses_legendary"
+      "test_epic_uninstall_uses_legendary",
+      "test_epic_library_uses_a_bounded_longer_window",
+      "test_clearing_the_cli_bundle_cache_keeps_account_and_install_metadata"
     ],
     "tests/test_process.py": [
-      "test_process_runner_allows_a_larger_limit_for_one_bounded_command"
+      "test_process_runner_allows_a_larger_limit_for_one_bounded_command",
+      "test_process_runner_allows_a_longer_window_for_one_bounded_command"
     ],
     "tests/test_cloud_saves.py": [
       "test_nonempty_local_save_uploads_and_creates_backup"

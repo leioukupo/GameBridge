@@ -55,7 +55,18 @@ class Plugin:
         return self.app.providers.summaries()
 
     async def install_provider_tool(self, provider_id: str) -> dict[str, str]:
-        return await self.app.install_provider_tool(provider_id)
+        decky.logger.info("Provider tool install started provider=%s", provider_id)
+        try:
+            result = await self.app.install_provider_tool(provider_id)
+        except Exception:
+            decky.logger.exception("Provider tool install failed provider=%s", provider_id)
+            raise
+        decky.logger.info(
+            "Provider tool install completed provider=%s version=%s",
+            provider_id,
+            result.get("version", ""),
+        )
+        return result
 
     async def authenticate_epic(self, authorization_code: str) -> dict[str, object]:
         return await self.app.authenticate_epic(authorization_code)

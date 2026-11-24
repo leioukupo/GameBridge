@@ -1,5 +1,6 @@
 import hashlib
 from io import BytesIO
+from urllib.error import HTTPError, URLError
 
 import pytest
 
@@ -40,6 +41,121 @@ def test_installer_verifies_and_atomically_installs(tmp_path, monkeypatch):
     assert target.read_bytes() == content
     assert target.stat().st_mode & 0o111
     assert result["version"] == "test"
+
+
+class RouteResponse(BytesIO):
+    """One served download route, keyed by the URL the installer requested."""
+
+    def __init__(self, content: bytes, url: str) -> None:
+        super().__init__(content)
+        self.url = url
+        self.headers = {"Content-Length": str(len(content))}
+
+    def geturl(self) -> str:
+        return self.url
+
+    def __enter__(self) -> "RouteResponse":
+        return self
+
+    def __exit__(self, *args) -> None:
+        self.close()
+
+
+GATEWAY_URL = "https://1300823591-fyjwaget5r.ap-guangzhou.tencentscf.com/download/legendary"
+OFFICIAL_URL = "https://github.com/example/official"
+
+
+def routed_release(content: bytes) -> ToolRelease:
+    return ToolRelease(
+        "test", OFFICIAL_URL, hashlib.sha256(content).hexdigest(), "legendary", GATEWAY_URL
+    )
+
+
+def test_legendary_release_follows_the_child_architecture(monkeypatch, tmp_path):
+    """An emulated x86_64 host still runs downloaded CLI tools natively."""
+    fake_uname = tmp_path / "uname"
+    fake_uname.write_text("#!/bin/sh\nprintf 'aarch64\\n'\n", encoding="utf-8")
+    fake_uname.chmod(0o755)
+    monkeypatch.setattr("gamebridge.tooling.shutil.which", lambda name: str(fake_uname))
+    monkeypatch.setattr("gamebridge.tooling.platform.machine", lambda: "x86_64")
+
+    assert ToolInstaller.child_architecture() == "aarch64"
+    assert ToolInstaller().legendary_release() is LEGENDARY_RELEASES["aarch64"]
+    assert LEGENDARY_RELEASES["aarch64"].gateway_url is None
+
+
+def test_legendary_release_falls_back_to_the_host_architecture(monkeypatch):
+    monkeypatch.setattr("gamebridge.tooling.shutil.which", lambda _name: None)
+    monkeypatch.setattr("gamebridge.tooling.platform.machine", lambda: "AMD64")
+
+    assert ToolInstaller.child_architecture() == "x86_64"
+    assert ToolInstaller().legendary_release() is LEGENDARY_RELEASES["x86_64"]
+
+
+def test_download_falls_back_to_the_official_route_when_the_gateway_is_down(
+    tmp_path, monkeypatch
+):
+    content = b"hello world"
+    installer = ToolInstaller()
+    attempted: list[str] = []
+
+    def fake_urlopen(request, *_args, **_kwargs):
+        attempted.append(request.full_url)
+        if "tencentscf.com" in request.full_url:
+            raise HTTPError(request.full_url, 502, "Bad Gateway", {}, None)
+        return RouteResponse(content, "https://release-assets.githubusercontent.com/asset")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = installer._download(routed_release(content), tmp_path, ".fallback-")
+
+    assert result.read_bytes() == content
+    assert attempted == [GATEWAY_URL, OFFICIAL_URL]
+    status = installer.progress_status()
+    assert status["phase"] == "verifying"
+    assert status["source"] == "official"
+
+
+def test_download_rejects_a_gateway_payload_that_fails_the_pinned_digest(
+    tmp_path, monkeypatch
+):
+    content = b"hello world"
+    installer = ToolInstaller()
+    attempted: list[str] = []
+
+    def fake_urlopen(request, *_args, **_kwargs):
+        attempted.append(request.full_url)
+        if "tencentscf.com" in request.full_url:
+            return RouteResponse(b"wrong payload", request.full_url)
+        return RouteResponse(content, OFFICIAL_URL)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = installer._download(routed_release(content), tmp_path, ".digest-")
+
+    assert result.read_bytes() == content
+    assert attempted == [GATEWAY_URL, OFFICIAL_URL]
+
+
+def test_download_reports_failure_once_every_route_is_down(tmp_path, monkeypatch):
+    content = b"hello world"
+    installer = ToolInstaller()
+    attempted: list[str] = []
+
+    def fake_urlopen(request, *_args, **_kwargs):
+        attempted.append(request.full_url)
+        raise URLError("Download route temporarily unavailable")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    with pytest.raises(URLError, match="temporarily unavailable"):
+        installer._download(routed_release(content), tmp_path, ".offline-")
+
+    assert attempted == [GATEWAY_URL, OFFICIAL_URL]
+    status = installer.progress_status()
+    assert status["active"] is False
+    assert status["phase"] == "failed"
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_installer_rejects_untrusted_url(tmp_path, monkeypatch):

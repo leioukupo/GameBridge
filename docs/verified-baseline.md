@@ -1,6 +1,6 @@
 # GameBridge 验收基线
 
-更新日期：2026-08-30
+更新日期：2026-11-24
 
 这是 GameBridge 的“保护锁清单”。新会话不得从聊天记录猜测结论，修改代码前必须以本文件和当前测试为准。
 
@@ -80,11 +80,24 @@ Steam Deck 的真机结论需要单独记录，不得直接继承 Xbox Ally X �
 | 国际服绝区零 | 已真机验收 | 国际服 3.1.0 从大屏幕统一卡片启动 `ZenlessZoneZero.exe`，越过黑屏并进入 HoYoverse 登录页 | 保护 DWProton 11.0-11 和 `hoyoplay-global/nap_global` 独立 Prefix；不得恢复四游戏共用 Prefix |
 | 国际服崩坏3 | 已真机验收 | 国际服 9.0.0 从大屏幕统一卡片启动 `BH3.exe`，自动发现 Game 盘的 Valve `Proton Hotfix`，进入游戏内“资源下载”选择页，未再产生新的 `[4,643,0]` 错误 | 国际服 9.0 只使用任意已挂载 Steam 库中的 Proton Hotfix，保留 `hoyoplay-global/bh3_global` 独立 Prefix；缺失时由 Steam 自动补装；国服 / B 服仍使用已验证的 GE-Proton 路线 |
 
+2026-11-24 在一台 aarch64 掌机（Armada 20261116.2fc282e，Steam 原生 arm64、Decky 等价 PluginLoader 以 x86_64 经 FEX 运行插件后端）上定位 Epic 登录卡在“正在连接下载线路…”的原因：固定下载网关的 `/download/legendary`、`/download/umu`、`/download/dw`、`/download/ge` 四条路由当时全部返回 502（`{"ok":false,"error":"Download route temporarily unavailable"}`），而 x86_64 构建的受管组件只有网关单条线路、没有备用线路，安装在 connecting 阶段抛错，前端因此从未打开 Epic 登录页。该设备 `providers/epic/tools/` 为空、`compatibility/tools/` 为空，与这一结论一致。
+
+同一设备上确认Legendary 的 x86_64 构建在 FEX 下无法加载自带原生依赖（`Cryptodome.Util._cpuid_c` 要求 `cpython-314-aarch64-linux-gnu.so`），`legendary list` 与 `legendary status --json` 直接失败；原生 aarch64 构建在同一最小环境下正常，`status --offline --json` 报告已登录，`list --json` 返回 352 款。修复按 `uname -m` 的子进程架构选择 Legendary 构建，兼容层仍保持 x86_64 构建。
+
+以上修复以源码文件同步方式装入设备上的 GameBridge-v0.19.0-beta.5（SHA-256：`27df8318ee893b462a6cb4458f56a58d71868e5d214f5245df26b39f16e7d416`）插件目录后复测：用户在大屏幕中完成 Epic 登录，插件保存会话并显示“已连接”，`connection_status` 与 `library()` 通过插件自身代码路径返回 352 款（8.1 秒），`sync_provider_library("epic")` 返回 352 款耗时 45.7 秒，`steam_library_games()` 返回 352 条 Epic 记录耗时 0.4 秒；此前 Epic 标签显示 0，是登录成功后的首次库同步被通用 30 秒命令超时打断，数据库从未写入 Epic 记录。由于该结果来自手工文件同步而非按发布流程生成的安装包，本轮只记录为“已观察到”，不提升为“已真机验收”；Epic 游戏的下载、更新、启动以及 aarch64 主机上 FEX 与 x86_64 兼容层的组合仍待真机验证。
+
+同轮记录两个未修复的既有问题：登录进行中 `SteamBrowserAuthorization` 的 cookie 回退会在 Epic 下发会话 cookie 后每 0.3 秒带 cookie 重放一次 Epic 授权接口（用户还在输入密码时即开始，页面侧出现多个 hCaptcha 挑战）；该设备上的 steamwebhelper 与 PluginLoader 各崩溃过一次（steamwebhelper SIGTRAP 转储核心、PluginLoader `concurrent map writes` / `unknown caller pc`），登录中断时前端表现为“后端响应超时”。
+
+发布打包闸门状态：本工作副本是 2026-11-24 从 `github.com/leioukupo/GameBridge` 新克隆，`releases/GameBridge-v0.19.0-beta.4.zip`（锁定 SHA-256：`b8ab2de76f7fee0c511e99b24914032bc9e7f71aa4093dd2367092ed6059c9f7`）在本机与其它主机均已找不到，`regression_guard.py --release` 因此无法通过，本次修复尚未生成发布包。Git 祖先校验与全部已锁测试均通过。
+
 ## 自动保护基线
 
 下列部分必须继续通过 Python 测试、TypeScript 类型检查和前端构建：
 
 - Provider 安装检测、游戏路径保留和外置存储未连接状态。
+- 受管组件下载在网关失败或返回错误内容时按同一固定散列回退官方源；全部线路失败时明确报错并清理临时文件。
+- Legendary 构建按 `uname -m` 报告的子进程架构选择，x86_64 兼容层选择保持不变；换架构安装时清理 Legendary 解压缓存。
+- Epic 游戏库命令使用独立的有界执行窗口与输出上限。
 - 兼容层自动发现、按需准备和运行时选择。
 - UMU Launcher、GE-Proton、DWProton 与 Legendary 已由自动测试保护为同一固定网关入口，并显示真实下载百分比、当前步骤及国内源/官方源。海外官方源和中国大陆国内源均已完成清空四项后的 beta5 真机验收。
 - 国际服《崩坏3》缺少 Proton Hotfix 时的 Steam 官方自动补装已通过接口与代码回归检查；仍需在一台未安装 Hotfix 的干净机器上补一次完整下载验收。
