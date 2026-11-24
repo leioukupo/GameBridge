@@ -1,11 +1,12 @@
 import base64
+import os
 import struct
 from pathlib import Path
 
 import pytest
 
 import gamebridge.application as application_module
-from gamebridge.application import GameBridgeApplication
+from gamebridge.application import GameBridgeApplication, PLUGIN_DIRECTORY
 from gamebridge.models import GameReference
 from gamebridge.providers.hoyoplay import HoYoPlayProvider
 
@@ -235,7 +236,7 @@ def test_global_genshin_shortcut_uses_native_region_router(tmp_path):
     assert profile == {
         "mode": "gamebridge_router",
         "executable": "/usr/bin/python3",
-        "start_directory": "/home/deck/homebrew/plugins/GameBridge",
+        "start_directory": os.fspath(PLUGIN_DIRECTORY),
         "launch_options": (
             '"gamebridge/launcher.py" --provider mihoyo --game-id "genshin"'
         ),
@@ -261,7 +262,7 @@ def test_other_shared_games_use_stable_unified_region_router(
     assert profile == {
         "mode": "gamebridge_router",
         "executable": "/usr/bin/python3",
-        "start_directory": "/home/deck/homebrew/plugins/GameBridge",
+        "start_directory": os.fspath(PLUGIN_DIRECTORY),
         "launch_options": (
             '"gamebridge/launcher.py" --provider mihoyo '
             f'--game-id "{route_game_id}"'
@@ -830,3 +831,10 @@ async def test_epic_login_stays_connected_when_the_first_library_sync_fails(
         "synced",
         "status",
     ]
+
+
+
+
+
+def test_shortcut_start_directory_follows_the_installed_plugin_root():
+    assert PLUGIN_DIRECTORY == Path(application_module.__file__).resolve().parent.parent

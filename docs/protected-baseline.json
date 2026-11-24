@@ -72,7 +72,8 @@
       "test_global_genshin_shortcut_uses_native_region_router",
       "test_steam_library_returns_epic_accounts_larger_than_one_page",
       "test_epic_sync_replaces_previous_account_library_without_deleting_installs",
-      "test_epic_login_stays_connected_when_the_first_library_sync_fails"
+      "test_epic_login_stays_connected_when_the_first_library_sync_fails",
+      "test_shortcut_start_directory_follows_the_installed_plugin_root"
     ],
     "tests/test_process.py": [
       "test_process_runner_allows_a_larger_limit_for_one_bounded_command",
@@ -104,7 +105,8 @@
       "test_ready_hoyoplay_native_action_uses_steam_play_label_and_icon",
       "test_first_custom_compat_tool_install_prompts_for_one_restart",
       "test_bh3_hotfix_install_is_claimed_and_continued_by_steam",
-      "test_epic_login_wait_covers_the_backend_and_leaves_a_retry_hint"
+      "test_epic_login_wait_covers_the_backend_and_leaves_a_retry_hint",
+      "test_shortcut_start_directory_comes_from_the_installed_plugin_root"
     ]
   },
   "baselineArchiveNote": "gitCommit remains the published beta4 anchor. The beta4 release archive was lost when the workspace was re-cloned on 2026-11-24 and could not be recovered from any host, so the packaging gate pins the surviving beta.5 archive; the test device has since run the beta.6 and beta.7 archives built by this same gate and their digests are recorded in docs/verified-baseline.md."

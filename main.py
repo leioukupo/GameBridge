@@ -331,6 +331,9 @@ class Plugin:
     ) -> str:
         return self.app.shortcut_profile_launch_preset(preset, base, mode)
 
+    async def plugin_directory(self) -> str:
+        return PLUGIN_ROOT
+
     async def launch_modifier_availability(self) -> dict[str, bool]:
         plugin_root = os.path.join(decky.DECKY_USER_HOME, "homebrew", "plugins")
         return self.app.launch_modifier_availability(plugin_root)

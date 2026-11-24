@@ -340,4 +340,12 @@ def test_epic_login_wait_covers_the_backend_and_leaves_a_retry_hint() -> None:
     assert "librarySyncFailed?: boolean" in SOURCE
     assert "await withTimeout(authentication, 480000)" in SOURCE
     assert "await withTimeout(authentication, 360000)" not in SOURCE
-    assert 'setLibrarySyncMessage(t("librarySyncPendingAfterLogin"))' in SOURCE
+    assert 'setLibrarySyncMessage(t("librarySyncPendingAfterLogin"))' in SOURCE
+
+
+def test_shortcut_start_directory_comes_from_the_installed_plugin_root() -> None:
+    assert 'const getPluginDirectory = callable<[], string>("plugin_directory")' in SOURCE
+    assert "void loadPluginStartDirectory();" in SOURCE
+    assert "SetShortcutStartDir(appId, gamebridgeStartDirectory)" in SOURCE
+    assert 'SetShortcutStartDir(appId, "/home/deck/homebrew/plugins/GameBridge")' not in SOURCE
+    assert 'AddShortcut(\n          game.title,\n          GAMEBRIDGE_ENTRY,\n          gamebridgeStartDirectory,' in SOURCE

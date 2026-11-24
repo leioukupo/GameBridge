@@ -181,6 +181,7 @@ type ModifierAvailability = { lsfg: boolean; framegen: boolean };
 const shortcutLaunchPreset = callable<[preset: LaunchPreset, providerId: string, externalGameId: string], string>("shortcut_launch_preset");
 const shortcutProfileLaunchPreset = callable<[preset: LaunchPreset, base: string, mode: SteamShortcutProfile["mode"]], string>("shortcut_profile_launch_preset");
 const getLaunchModifierAvailability = callable<[], ModifierAvailability>("launch_modifier_availability");
+const getPluginDirectory = callable<[], string>("plugin_directory");
 const GAMEBRIDGE_ENTRY = "/usr/bin/python3";
 const getSteamGameDetails = callable<[steamAppId: number, title?: string], GameDetails | null>("steam_game_details");
 let cachedDashboard: Dashboard | undefined;
@@ -362,7 +363,7 @@ function ProviderSteamLibraryPage({ providerIds }: { providerIds: string[] }) {
         appId = await SteamClient.Apps.AddShortcut(
           game.title,
           GAMEBRIDGE_ENTRY,
-          "/home/deck/homebrew/plugins/GameBridge",
+          gamebridgeStartDirectory,
           `"gamebridge/launcher.py" --provider ${game.provider_id} --game-id "${game.external_game_id}"`,
         );
         if (!appId) throw new Error(t("shortcutFailed"));
@@ -689,14 +690,14 @@ async function launchProviderThroughSteam(provider: ProviderSummary, mode: "inst
   const appId = await SteamClient.Apps.AddShortcut(
     title,
     GAMEBRIDGE_ENTRY,
-    "/home/deck/homebrew/plugins/GameBridge",
+    gamebridgeStartDirectory,
     launchOptions,
   );
   if (!appId) throw new Error(t("shortcutFailed"));
   await waitForSteamShortcut(appId);
   SteamClient.Apps.SetShortcutName(appId, title);
   SteamClient.Apps.SetShortcutExe(appId, GAMEBRIDGE_ENTRY);
-  SteamClient.Apps.SetShortcutStartDir(appId, "/home/deck/homebrew/plugins/GameBridge");
+  SteamClient.Apps.SetShortcutStartDir(appId, gamebridgeStartDirectory);
   setShortcutLaunchOptions(appId, launchOptions);
   if (typeof apps.RunGame !== "function") throw new Error("Steam RunGame API unavailable");
   const gameId = await waitForShortcutGameId(appId) ?? shortcutRunGameId(appId);
@@ -769,7 +770,7 @@ async function applyIntegratedLaunchPreset(
       preset, game.provider_id, game.external_game_id,
     );
     SteamClient.Apps.SetShortcutExe(appId, GAMEBRIDGE_ENTRY);
-    SteamClient.Apps.SetShortcutStartDir(appId, "/home/deck/homebrew/plugins/GameBridge");
+    SteamClient.Apps.SetShortcutStartDir(appId, gamebridgeStartDirectory);
     setShortcutLaunchOptions(appId, launchOptions);
   }
   void setRuntimeLanguage(
@@ -971,6 +972,17 @@ function applySteamManagementMenuPatch(): () => void {
   return () => patches.splice(0).reverse().forEach((patch) => patch.unpatch());
 }
 
+// Steam runs the launcher script relative to the shortcut start directory. The
+// standard Decky root is only a fallback: the backend reports the real one.
+let gamebridgeStartDirectory = "/home/deck/homebrew/plugins/GameBridge";
+
+async function loadPluginStartDirectory(): Promise<void> {
+  try {
+    const value = await withTimeout(getPluginDirectory(), 8000);
+    if (typeof value === "string" && value) gamebridgeStartDirectory = value;
+  } catch (_) { /* Keep the standard Decky root until the backend answers. */ }
+}
+
 function applyManagedShortcutTarget(appId: number, game: SteamLibraryGame | GameDetails): void {
   const profile = game.steam_shortcut;
   if (profile?.mode === "direct_executable") {
@@ -992,7 +1004,7 @@ function applyManagedShortcutTarget(appId: number, game: SteamLibraryGame | Game
     return;
   }
   SteamClient.Apps.SetShortcutExe(appId, GAMEBRIDGE_ENTRY);
-  SteamClient.Apps.SetShortcutStartDir(appId, "/home/deck/homebrew/plugins/GameBridge");
+  SteamClient.Apps.SetShortcutStartDir(appId, gamebridgeStartDirectory);
   setShortcutLaunchOptions(
     appId,
     `"gamebridge/launcher.py" --provider ${game.provider_id} --game-id "${game.external_game_id}"`,
@@ -3332,6 +3344,7 @@ function MiHoYoLogo() {
 }
 
 export default definePlugin(() => {
+  void loadPluginStartDirectory();
   void getDashboard().then(cacheDashboard).catch(() => undefined);
   void getLaunchModifierAvailability().then((value) => {
     cachedModifierAvailability = value;

@@ -43,6 +43,11 @@ from .storage import approved_install_path, ensure_wine_storage_drive, storage_r
 from .tooling import ToolInstaller
 
 
+# The plugin can be installed under a different homebrew root than the standard
+# Steam Deck one, and Steam resolves the launcher script relative to this value.
+PLUGIN_DIRECTORY = Path(__file__).resolve().parent.parent
+
+
 class GameBridgeApplication:
     def __init__(self, data_directory: str | Path) -> None:
         self.data_directory = Path(data_directory)
@@ -1053,7 +1058,7 @@ class GameBridgeApplication:
             return {
                 "mode": "gamebridge_router",
                 "executable": "/usr/bin/python3",
-                "start_directory": "/home/deck/homebrew/plugins/GameBridge",
+                "start_directory": os.fspath(PLUGIN_DIRECTORY),
                 "launch_options": (
                     '"gamebridge/launcher.py" --provider mihoyo '
                     f'--game-id "{unified_game}"'
