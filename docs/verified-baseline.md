@@ -102,6 +102,16 @@ Steam Deck 的真机结论需要单独记录，不得直接继承 Xbox Ally X �
 
 设备实测（该次为按发布流程生成的安装包内代码路径）：先删除手工放置的 `tools/legendary-aarch64` 与残留缓存，原生 launcher 记录 `aarch64` 并报 `launch plan failed 1 cli=legendary reason=cli_architecture_mismatch`；重启插件宿主后宿主日志出现 `Epic CLI installed for the game client architecture path=…/providers/epic/tools/legendary-aarch64 version=0.21.0`，落盘文件 SHA-256 `ed0a523c7310aec590a0da9ecdada185fc3b02e75fa5148c0e7ef0680095dce5`，与 aarch64 固定发布一致（该构建没有国内网关线路，由设备直连 GitHub 取回）；再用 Steam 的实际调用方式复现（工作目录为插件根，`/usr/libexec/armada/armada-game-launch /usr/bin/python3 gamebridge/launcher.py --provider epic --game-id e8bbb84be35640cda646233152ff3428`），launcher 选中 `cli=legendary-aarch64 arch=aarch64`，不再出现 `launch plan failed`，`cloud download` 返回 `unchanged`，链路进入 umu-launcher 1.4.0 并开始拉取 `steamrt4-arm64` 运行时（本次 120 秒观察窗口内被中断，`providers/epic/.local/share/umu/steamrt4-arm64` 当时为空目录）。`cache/legendary` 与 `cache/variants/aarch64` 同时存在，说明两条上下文已隔离。Epic 游戏从 Steam 卡片「开始游戏」进入游戏仍未确认，本项保持「已观察到」，Steam 侧启动与兼容层运行时首次拉取待用户在该设备复验。
 
+2026-11-24 22:42-23:07 同一台 aarch64 掌机（Armada，Steam 原生 arm64、插件宿主 x86_64 经 FEX）上继续 Epic 启动链路。`GameBridge-v0.19.0-beta.13.zip`（SHA-256 `b0ee145cfc79e537a0686afd959b582cec4ebc3a7870fe1559767b673b0b44e0`）与 `GameBridge-v0.19.0-beta.14.zip`（SHA-256 `f088271e797e483a7bff588dee91cc0583276a9759296e73020b65fb36ce99e2`）按 `scripts/build_plugin_zip.py` 生成并完整装入该设备，安装后文件清单与包内一致，宿主日志出现 `Loaded GameBridge (v0.19.0-beta.14)` 与 `GameBridge backend ready`。
+
+测得的机制：Steam 对 GameBridge 创建的非商店快捷方式给出的环境里没有 `SteamLaunchId`（`SteamAppId`、`SteamClientLaunch`、`Steam3Master` 等仍在），而该 Proton 版本的 `c:\windows\system32\steam.exe` 引导器无条件运行（脚本 2137-2175 行的 `waitforexitandrun` 与 `run` 都走它），引导器向客户端查询本次启动状态失败即弹出 `Assertion failed!`、`File: ...\src\issteamclient\steamclient_main.c`、`Line: 375`、`Expression: "status"`。对照实验：把抓到的同一份环境变量与同一串命令行从原生 shell 直接喂给同一个 `proton run`，Brotato 正常启动，说明断言只在 Steam 自己拉起的进程树里出现。
+
+改动与结果：beta.13 把 Epic 的兼容层入口从托管 umu 换成直接调用客户端自带 Proton，日志新增 `runtime route=client layer=<名称>`，同时不再需要 umu 自行下载的 467 MB `steamrt4-arm64` 运行时与第二层容器。beta.14 从 Epic 游戏环境中移除 Steam 客户端会话身份（`SteamAppId`、`SteamAppUser`、`SteamClientLaunch`、`Steam3Master`、`SteamOverlayGameId`、`SteamTenfoot`、`SteamUser`），保留 `SteamGameId`，因为该镜像的 Proton 用它匹配每应用翻译配置。两次改动后启动确实进入 Proton 与 DXVK：设备启动日志出现 `[Gamescope WSI] pEngineName: DXVK`、`xalia.exe`、`explorer.exe`、`fsync: up and running`，22:04 那次游戏进程运行约 33 秒后以退出码 3 结束（日志 `exit 3`），22:06 那次仍回到同一个断言对话框，结果不稳定。
+
+在该镜像上跳过 Proton 脚本直接调用其 `files/bin-arm64/wine` 不可行：缺少 Proton 注入的运行时环境，Wine 进程无法启动（同一环境下直接执行该 wine 二进制，20/40/60/90 秒四次采样都没有游戏进程）。
+
+结论：Epic 游戏启动在这一设备类别上仍记为「未通过真机验收」。GameBridge 自身的两处问题已经消除：架构错配导致的 `launch plan failed`（beta.12）、以及多余的运行时容器层级（beta.13/14）。剩余失败发生在设备镜像自带的 Proton Experimental (ARM64) 引导器与其 Gamescope WSI、xalia、Epic Online Services 组合上，需要单独一轮针对该 Proton 构建的排查。Epic 的下载与安装在该设备类别上的结果保持不变（已真机完成）。
+
 发布基线包变更：本工作副本是 2026-11-24 从 `github.com/leioukupo/GameBridge` 新克隆，`releases/GameBridge-v0.19.0-beta.4.zip`（原锁定 SHA-256 `b8ab2de76f7fee0c511e99b24914032bc9e7f71aa4093dd2367092ed6059c9f7`）在本机与其它主机均已找不到。用户要求发布 release，无法恢复该历史基线包，本次将 `docs/protected-baseline.json` 的 `releaseArchive`/`releaseSha256` （改动已向用户说明）改为记录设备上实际在用、SHA-256 已核对的 `releases/GameBridge-v0.19.0-beta.5.zip`（`27df8318ee893b462a6cb4458f56a58d71868e5d214f5245df26b39f16e7d416`），`gitCommit` 仍是 beta4 锚点，Git 祖先校验和全部已锁测试保持不变。
 
 ## 自动保护基线

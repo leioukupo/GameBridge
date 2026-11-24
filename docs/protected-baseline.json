@@ -73,7 +73,9 @@
       "test_bh3_global_prefers_proton_hotfix_from_any_steam_library",
       "test_bh3_global_requests_official_hotfix_and_waits_for_it",
       "test_hoyoplay_game_drive_maps_the_external_root_containing_launcher",
-      "test_plan_failure_reason_never_repeats_authentication_material"
+      "test_plan_failure_reason_never_repeats_authentication_material",
+      "test_client_installed_proton_layers_run_without_the_managed_wrapper",
+      "test_epic_games_keep_no_steam_client_session_identity"
     ],
     "tests/test_library.py": [
       "test_global_genshin_shortcut_uses_native_region_router",

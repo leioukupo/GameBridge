@@ -5,6 +5,9 @@ from gamebridge.launcher import (
     _apply_lsfg_paths,
     _bh3_global_runtime,
     _bh3_runtime,
+    _client_runtime_proton,
+    _without_steam_client_session,
+    _steam_client_install_path,
     _compose_game_wrapper,
     _ensure_hoyoplay_game_drive,
     _hoyoplay_launch_executable,
@@ -63,6 +66,54 @@ def test_legendary_json_plan_becomes_a_structured_waited_command(tmp_path):
     assert environment == {"WINEPREFIX": str(tmp_path / "prefix")}
     assert pre_launch == ["/usr/bin/true", "--check"]
     assert pre_launch_wait is True
+
+
+def test_epic_games_keep_no_steam_client_session_identity():
+    """Proton must not ask the client about a launch it never registered."""
+    environment = {
+        "SteamAppId": "3060452607",
+        "SteamAppUser": "player",
+        "SteamClientLaunch": "1",
+        "Steam3Master": "127.0.0.1:57343",
+        "SteamOverlayGameId": "13144543858056495104",
+        "SteamTenfoot": "1",
+        "SteamUser": "player",
+        "SteamGameId": "13144543858056495104",
+        "SteamEnv": "1",
+        "WINEPREFIX": "/prefix",
+    }
+
+    stripped = _without_steam_client_session(environment)
+
+    assert set(stripped) == {"SteamGameId", "SteamEnv", "WINEPREFIX"}
+    assert environment["SteamAppId"] == "3060452607"
+
+
+def test_client_installed_proton_layers_run_without_the_managed_wrapper(tmp_path):
+    """A layer the game client ships is started the way the client starts it."""
+    steam_root = tmp_path / ".local/share/Steam"
+    layer = steam_root / "steamapps/common/Proton Experimental (ARM64)"
+    layer.mkdir(parents=True)
+    (layer / "proton").write_text("#!/bin/sh\n", encoding="utf-8")
+    (layer / "proton").chmod(0o755)
+    managed_root = tmp_path / "compatibility/tools"
+    managed_root.mkdir(parents=True)
+
+    assert _client_runtime_proton(layer, managed_root) == layer / "proton"
+    assert _steam_client_install_path(layer) == steam_root
+
+    incomplete = steam_root / "steamapps/common/Proton 9"
+    incomplete.mkdir(parents=True)
+    assert _client_runtime_proton(incomplete, managed_root) is None
+
+    downloaded = managed_root / "GE-Proton11-5"
+    downloaded.mkdir(parents=True)
+    (downloaded / "proton").write_text("#!/bin/sh\n", encoding="utf-8")
+    (downloaded / "proton").chmod(0o755)
+    assert _client_runtime_proton(downloaded, managed_root) is None
+
+    assert _client_runtime_proton("UMU-Proton", managed_root) is None
+    assert _steam_client_install_path(tmp_path / "somewhere/layer") is None
 
 
 def test_plan_failure_reason_never_repeats_authentication_material():

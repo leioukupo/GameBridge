@@ -1,5 +1,12 @@
 # 更新日志
 
+## 0.19.0-beta.13
+
+- Epic 游戏在主机上已有游戏客户端自带 Proton 的情况下直接调用该兼容层。此前 Epic 启动先经过 GameBridge 托管的 umu 入口，游戏被放进第二层运行时容器，容器里的进程无法回应游戏客户端的启动握手，Proton 的 `steam.exe` 引导器随即弹出 `Assertion failed!` 与 `Expression: "status"` 对话框，游戏始终进不去。直连之后在这台 aarch64 掌机上已经跑出游戏画面，同时省掉 umu 自己下载的 467 MB `steamrt4-arm64` 运行时。
+- GameBridge 自行下载的 GE-Proton、DWProton 继续走托管 umu 入口，由 umu 提供它们需要的容器。直连时 Proton 需要 `STEAM_COMPAT_CLIENT_INSTALL_PATH`，非商店快捷方式不会设置这个变量，GameBridge 现在按兼容层所在路径推导并补上。
+- 启动日志记录本次选择的运行时：`runtime route=client|managed layer=<名称>`。
+- Epic 游戏的环境里去掉 Steam 客户端的会话身份（`SteamAppId`、`SteamClientLaunch`、`Steam3Master`、`SteamUser`、`SteamAppUser`、`SteamOverlayGameId`、`SteamTenfoot`）。Proton 的 `steam.exe` 引导器会拿这份身份去问客户端要本次启动的状态记录，GameBridge 建的快捷方式在客户端没有这条记录，引导器随即断言退出。`SteamGameId` 保留，掌机厂商写在 Proton 里的转换配置按它匹配。
+
 ## 0.19.0-beta.12
 
 - 修复插件宿主与游戏客户端架构不一致时 Epic 游戏无法启动。在模拟执行的插件宿主里，GameBridge 自己调用的 Legendary 与 Steam 直接启动的游戏进程不是同一个架构，此前两者共用 `tools/legendary` 这一个文件和同一份解压缓存，两边互相要求对方架构的原生模块，启动只会留下 `launch plan failed`。现在每个架构各自保存构建（`tools/legendary-<架构>`）并使用各自的解压目录：登录、游戏库同步、下载安装继续用宿主自己的构建，Steam 启动的游戏用主机原生构建。

@@ -222,6 +222,61 @@ def _record_last_played(root_data: Path, provider_id: str, game_id: str) -> None
         pass
 
 
+# Proton starts every game through its built-in steam.exe, which asks the running
+# Steam client for the status of the launch it was given. A shortcut GameBridge
+# created has no such record, and the bootstrapper aborts with an assertion dialog.
+# An Epic game has no Steam session to join either, so this identity is dropped and
+# the bootstrapper runs the game directly. SteamGameId is kept: the device vendor
+# profiles in Proton select translation settings by it.
+STEAM_CLIENT_SESSION_VARIABLES = (
+    "SteamAppId",
+    "SteamAppUser",
+    "SteamClientLaunch",
+    "Steam3Master",
+    "SteamOverlayGameId",
+    "SteamTenfoot",
+    "SteamUser",
+)
+
+
+def _without_steam_client_session(environment: dict[str, str]) -> dict[str, str]:
+    """The game environment with the Steam client session identity removed."""
+    stripped = dict(environment)
+    for name in STEAM_CLIENT_SESSION_VARIABLES:
+        stripped.pop(name, None)
+    return stripped
+
+
+def _client_runtime_proton(runtime_path: Path | str, managed_root: Path) -> Path | None:
+    """The game client's own Proton entry point, when it can be used directly.
+
+    A layer GameBridge downloaded itself needs the managed umu entry point to supply
+    its container. A layer the game client already installed is a native directory the
+    client runs on its own, and running it the same way keeps the process inside the
+    Steam launch environment it was started from.
+    """
+    if not isinstance(runtime_path, Path):
+        return None
+    if managed_root == runtime_path or managed_root in runtime_path.parents:
+        return None
+    script = runtime_path / "proton"
+    return script if script.is_file() and os.access(script, os.X_OK) else None
+
+
+def _steam_client_install_path(runtime_path: Path | str) -> Path | None:
+    """Steam installation that owns this compat layer, read from the layer path.
+
+    Proton needs ``STEAM_COMPAT_CLIENT_INSTALL_PATH`` when the game client did not set
+    it, which is the case for a non-store shortcut.
+    """
+    if not isinstance(runtime_path, Path):
+        return None
+    parts = runtime_path.parts
+    if "steamapps" not in parts or parts.index("steamapps") < 2:
+        return None
+    return Path(*parts[: parts.index("steamapps")])
+
+
 PLAN_FAILURE_REASONS = (
     ("cannot load native module", "cli_architecture_mismatch"),
     ("no space left on device", "disk_full"),
@@ -1006,6 +1061,24 @@ def main() -> int:
         _write_log(root_data / "compatibility" / "logs", f"launch plan invalid: {exc}")
         return 5
     environment.update(launch_environment)
+    environment = _without_steam_client_session(environment)
+    proton_script = _client_runtime_proton(runtime_path, compatibility.tools_directory)
+    client_install = _steam_client_install_path(runtime_path) if proton_script else None
+    if proton_script is not None and client_install is not None:
+        # Calling the layer directly is how the client itself runs it. Routing it
+        # through the managed umu entry point puts the game inside a second runtime
+        # container, and a process in that container cannot answer the client launch
+        # handshake, which Proton then aborts with an assertion dialog.
+        launch_command = [os.fspath(proton_script), "run", *launch_command[1:]]
+        environment["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = os.fspath(client_install)
+        environment["PROTON_VERB"] = "run"
+        runtime_route = "client"
+    else:
+        runtime_route = "managed"
+    _write_log(
+        root_data / "compatibility" / "logs",
+        f"runtime route={runtime_route} layer={runtime_name}",
+    )
     if pre_launch:
         pre_process = subprocess.Popen(pre_launch, env=environment)  # noqa: S603 -- parsed trusted plan
         if pre_launch_wait:
