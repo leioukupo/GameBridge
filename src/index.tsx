@@ -1003,31 +1003,47 @@ function applyManagedShortcutTarget(appId: number, game: SteamLibraryGame | Game
     if (typeof apps.SpecifyCompatTool === "function") apps.SpecifyCompatTool(appId, "");
     return;
   }
+  applyLauncherShortcutTarget(appId, game);
+}
+
+function launcherShortcutOptions(game: SteamLibraryGame | GameDetails): string {
+  return `"gamebridge/launcher.py" --provider ${game.provider_id} --game-id "${game.external_game_id}"`;
+}
+
+function applyLauncherShortcutTarget(appId: number, game: SteamLibraryGame | GameDetails): void {
   SteamClient.Apps.SetShortcutExe(appId, GAMEBRIDGE_ENTRY);
   SteamClient.Apps.SetShortcutStartDir(appId, gamebridgeStartDirectory);
-  setShortcutLaunchOptions(
-    appId,
-    `"gamebridge/launcher.py" --provider ${game.provider_id} --game-id "${game.external_game_id}"`,
-  );
+  setShortcutLaunchOptions(appId, launcherShortcutOptions(game));
 }
 
 function reconcileDirectShortcutTargets(games: SteamLibraryGame[]): void {
   for (const game of games) {
     const appId = game.steam_app_id;
     const profile = game.steam_shortcut;
-    if (!appId || !profile) continue;
+    if (!appId) continue;
     if (!(window as any).appStore?.GetAppOverviewByAppID?.(appId)) continue;
-    const fingerprint = JSON.stringify([
-      profile.mode,
-      profile.executable,
-      profile.start_directory,
-      profile.launch_options,
-      profile.compatibility_tool,
-    ]);
+    // Shortcuts registered by earlier GameBridge builds carry a start directory
+    // that only exists on a standard Steam Deck. Games without a backend profile
+    // still need one pass so the launcher script stays resolvable.
+    const fingerprint = profile
+      ? JSON.stringify([
+          profile.mode,
+          profile.executable,
+          profile.start_directory,
+          profile.launch_options,
+          profile.compatibility_tool,
+        ])
+      : JSON.stringify([
+          "launcher",
+          GAMEBRIDGE_ENTRY,
+          gamebridgeStartDirectory,
+          launcherShortcutOptions(game),
+        ]);
     const storageKey = `gamebridge.shortcutTarget.${appId}`;
     if (localStorage.getItem(storageKey) === fingerprint) continue;
     try {
-      applyManagedShortcutTarget(appId, game);
+      if (profile) applyManagedShortcutTarget(appId, game);
+      else applyLauncherShortcutTarget(appId, game);
       localStorage.setItem(storageKey, fingerprint);
     } catch (reason) {
       console.warn("[GameBridge] Managed shortcut target update failed", reason);
