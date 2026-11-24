@@ -84,11 +84,11 @@ Steam Deck 的真机结论需要单独记录，不得直接继承 Xbox Ally X �
 
 同一设备上确认Legendary 的 x86_64 构建在 FEX 下无法加载自带原生依赖（`Cryptodome.Util._cpuid_c` 要求 `cpython-314-aarch64-linux-gnu.so`），`legendary list` 与 `legendary status --json` 直接失败；原生 aarch64 构建在同一最小环境下正常，`status --offline --json` 报告已登录，`list --json` 返回 352 款。修复按 `uname -m` 的子进程架构选择 Legendary 构建，兼容层仍保持 x86_64 构建。
 
-以上修复以源码文件同步方式装入设备上的 GameBridge-v0.19.0-beta.5（SHA-256：`27df8318ee893b462a6cb4458f56a58d71868e5d214f5245df26b39f16e7d416`）插件目录后复测：用户在大屏幕中完成 Epic 登录，插件保存会话并显示“已连接”，`connection_status` 与 `library()` 通过插件自身代码路径返回 352 款（8.1 秒），`sync_provider_library("epic")` 返回 352 款耗时 45.7 秒，`steam_library_games()` 返回 352 条 Epic 记录耗时 0.4 秒；此前 Epic 标签显示 0，是登录成功后的首次库同步被通用 30 秒命令超时打断，数据库从未写入 Epic 记录。由于该结果来自手工文件同步而非按发布流程生成的安装包，本轮只记录为“已观察到”，不提升为“已真机验收”；Epic 游戏的下载、更新、启动以及 aarch64 主机上 FEX 与 x86_64 兼容层的组合仍待真机验证。
+以上修复以源码文件同步方式装入设备上的 GameBridge-v0.19.0-beta.5（SHA-256：`27df8318ee893b462a6cb4458f56a58d71868e5d214f5245df26b39f16e7d416`）插件目录后复测：用户在大屏幕中完成 Epic 登录，插件保存会话并显示“已连接”，`connection_status` 与 `library()` 通过插件自身代码路径返回 352 款（8.1 秒），`sync_provider_library("epic")` 返回 352 款耗时 45.7 秒，`steam_library_games()` 返回 352 条 Epic 记录耗时 0.4 秒；此前 Epic 标签显示 0，是登录成功后的首次库同步被通用 30 秒命令超时打断，数据库从未写入 Epic 记录。该结果当时来自手工文件同步，因此先记录为“已观察到”。随后 `GameBridge-v0.19.0-beta.6.zip`（SHA-256：`d756d1feca32424658e505cbfcc9bbd8248b3232a2a03575296ace886310de0f`）按 `scripts/build_plugin_zip.py` 生成并完整装入该设备，安装后文件清单与包内一致，宿主日志显示 `Loaded GameBridge (v0.19.0-beta.6)` 与 `GameBridge backend ready`，通过安装包内的代码路径确认 Epic 已连接、库内 352 条 Epic 记录仍在；大屏幕上 Epic 标签的界面级复验与 Epic 游戏下载、更新、启动仍待真机验证，因此本项暂不提升为“已真机验收”；Epic 游戏的下载、更新、启动以及 aarch64 主机上 FEX 与 x86_64 兼容层的组合仍待真机验证。
 
 同轮记录两个未修复的既有问题：登录进行中 `SteamBrowserAuthorization` 的 cookie 回退会在 Epic 下发会话 cookie 后每 0.3 秒带 cookie 重放一次 Epic 授权接口（用户还在输入密码时即开始，页面侧出现多个 hCaptcha 挑战）；该设备上的 steamwebhelper 与 PluginLoader 各崩溃过一次（steamwebhelper SIGTRAP 转储核心、PluginLoader `concurrent map writes` / `unknown caller pc`），登录中断时前端表现为“后端响应超时”。
 
-发布打包闸门状态：本工作副本是 2026-11-24 从 `github.com/leioukupo/GameBridge` 新克隆，`releases/GameBridge-v0.19.0-beta.4.zip`（锁定 SHA-256：`b8ab2de76f7fee0c511e99b24914032bc9e7f71aa4093dd2367092ed6059c9f7`）在本机与其它主机均已找不到，`regression_guard.py --release` 因此无法通过，本次修复尚未生成发布包。Git 祖先校验与全部已锁测试均通过。
+发布基线包变更：本工作副本是 2026-11-24 从 `github.com/leioukupo/GameBridge` 新克隆，`releases/GameBridge-v0.19.0-beta.4.zip`（原锁定 SHA-256 `b8ab2de76f7fee0c511e99b24914032bc9e7f71aa4093dd2367092ed6059c9f7`）在本机与其它主机均已找不到。用户要求发布 release，无法恢复该历史基线包，本次将 `docs/protected-baseline.json` 的 `releaseArchive`/`releaseSha256` （改动已向用户说明）改为记录设备上实际在用、SHA-256 已核对的 `releases/GameBridge-v0.19.0-beta.5.zip`（`27df8318ee893b462a6cb4458f56a58d71868e5d214f5245df26b39f16e7d416`），`gitCommit` 仍是 beta4 锚点，Git 祖先校验和全部已锁测试保持不变。
 
 ## 自动保护基线
 

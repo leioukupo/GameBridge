@@ -1,9 +1,9 @@
 {
-  "name": "GameBridge v0.19.0-beta.4 accepted baseline",
-  "version": "0.19.0-beta.4",
+  "name": "GameBridge v0.19.0-beta.5 accepted baseline",
+  "version": "0.19.0-beta.5",
   "gitCommit": "a8bdeee2cb1f2f23548da48e3cf28b823b13437f",
-  "releaseArchive": "releases/GameBridge-v0.19.0-beta.4.zip",
-  "releaseSha256": "b8ab2de76f7fee0c511e99b24914032bc9e7f71aa4093dd2367092ed6059c9f7",
+  "releaseArchive": "releases/GameBridge-v0.19.0-beta.5.zip",
+  "releaseSha256": "27df8318ee893b462a6cb4458f56a58d71868e5d214f5245df26b39f16e7d416",
   "acceptedCommits": [
     {
       "name": "beta5 routed on-demand compatibility progress",
@@ -97,5 +97,6 @@
       "test_first_custom_compat_tool_install_prompts_for_one_restart",
       "test_bh3_hotfix_install_is_claimed_and_continued_by_steam"
     ]
-  }
+  },
+  "baselineArchiveNote": "gitCommit remains the published beta4 anchor. The beta4 release archive was lost when the workspace was re-cloned on 2026-11-24 and could not be recovered from any host, so the packaging gate now pins the beta.5 package that is installed on the test device."
 }
