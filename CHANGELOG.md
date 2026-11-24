@@ -1,5 +1,11 @@
 # 更新日志
 
+## 0.19.0-beta.15
+
+- Epic 游戏走客户端自带 Proton 时，不再把本次启动交回 Steam 客户端。Proton 的 `steam.exe` 引导器会用 `SteamGameId` 拼出 `steam://launch/<id>` 让正在运行的 Steam 客户端接手，并断言客户端返回的状态；GameBridge 建的快捷方式在客户端没有这条启动记录，接手必然失败，游戏进程根本没起来就弹出 `Assertion failed!` 与 `Expression: "status"`。现在这条路线去掉引导器用来命名本次会话的 `SteamGameId`、`SteamExe`、`SteamPipe`、`SteamLaunchId`、`SteamPID`，引导器直接运行游戏可执行文件，与游戏客户端自己启动该兼容层的方式一致。
+- GameBridge 下载的 GE-Proton、DWProton 继续走托管 umu 入口，环境保持原样：Valve 在 Proton 里按 `SteamGameId` 匹配的每应用配置只针对商店应用编号，Epic 快捷方式没有可保留的设置。
+- 启动日志新增 `proton bootstrapper handoff removed <变量名>`，记录本次实际去掉的变量。
+
 ## 0.19.0-beta.13
 
 - Epic 游戏在主机上已有游戏客户端自带 Proton 的情况下直接调用该兼容层。此前 Epic 启动先经过 GameBridge 托管的 umu 入口，游戏被放进第二层运行时容器，容器里的进程无法回应游戏客户端的启动握手，Proton 的 `steam.exe` 引导器随即弹出 `Assertion failed!` 与 `Expression: "status"` 对话框，游戏始终进不去。直连之后在这台 aarch64 掌机上已经跑出游戏画面，同时省掉 umu 自己下载的 467 MB `steamrt4-arm64` 运行时。

@@ -6,6 +6,8 @@ from gamebridge.launcher import (
     _bh3_global_runtime,
     _bh3_runtime,
     _client_runtime_proton,
+    PROTON_CLIENT_HANDOFF_VARIABLES,
+    _without_proton_client_handoff,
     _without_steam_client_session,
     _steam_client_install_path,
     _compose_game_wrapper,
@@ -87,6 +89,32 @@ def test_epic_games_keep_no_steam_client_session_identity():
 
     assert set(stripped) == {"SteamGameId", "SteamEnv", "WINEPREFIX"}
     assert environment["SteamAppId"] == "3060452607"
+
+
+def test_epic_client_route_drops_the_proton_bootstrapper_handoff():
+    """Proton names its launch with SteamGameId and asserts the client reply."""
+    environment = {
+        "SteamGameId": "3060452607",
+        "SteamExe": "/home/user/.local/share/Steam/ubuntu12_64/steam",
+        "SteamPipe": "SteamPipe5150",
+        "SteamLaunchId": "14982090037396283053",
+        "SteamPID": "4242",
+        "WINEPREFIX": "/prefix",
+    }
+
+    removed = _without_proton_client_handoff(environment)
+
+    assert removed == PROTON_CLIENT_HANDOFF_VARIABLES
+    assert environment == {"WINEPREFIX": "/prefix"}
+
+
+def test_epic_managed_route_keeps_every_proton_handoff_name():
+    """The already accepted x86_64 route must keep the environment it was tested with."""
+    environment = {name: "1" for name in PROTON_CLIENT_HANDOFF_VARIABLES}
+
+    stripped = _without_steam_client_session(environment)
+
+    assert set(stripped) == set(PROTON_CLIENT_HANDOFF_VARIABLES)
 
 
 def test_client_installed_proton_layers_run_without_the_managed_wrapper(tmp_path):

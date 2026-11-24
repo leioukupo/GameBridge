@@ -225,9 +225,9 @@ def _record_last_played(root_data: Path, provider_id: str, game_id: str) -> None
 # Proton starts every game through its built-in steam.exe, which asks the running
 # Steam client for the status of the launch it was given. A shortcut GameBridge
 # created has no such record, and the bootstrapper aborts with an assertion dialog.
-# An Epic game has no Steam session to join either, so this identity is dropped and
-# the bootstrapper runs the game directly. SteamGameId is kept: the device vendor
-# profiles in Proton select translation settings by it.
+# An Epic game has no Steam session to join either, so this identity is dropped.
+# SteamGameId stays on the managed route, where the device vendor profiles in Proton
+# select translation settings by it; the client route removes it for its own reason.
 STEAM_CLIENT_SESSION_VARIABLES = (
     "SteamAppId",
     "SteamAppUser",
@@ -245,6 +245,37 @@ def _without_steam_client_session(environment: dict[str, str]) -> dict[str, str]
     for name in STEAM_CLIENT_SESSION_VARIABLES:
         stripped.pop(name, None)
     return stripped
+
+
+# Proton starts the game through its built-in steam.exe, and that bootstrapper names
+# the session it is starting with an app id: it opens ``steam://launch/<SteamGameId>``
+# on the running Steam client and asserts the reply. A shortcut GameBridge created has
+# no launch record on the client, so the handoff always fails and the bootstrapper
+# aborts with an assertion dialog before a game process exists. Without the naming
+# variables the bootstrapper runs the executable itself, which is how the game client
+# starts the same layer. Proton's own per-app settings also read SteamGameId, but only
+# for ids Valve curates, so an Epic shortcut gives nothing up.
+PROTON_CLIENT_HANDOFF_VARIABLES = (
+    "SteamGameId",
+    "SteamExe",
+    "SteamPipe",
+    "SteamLaunchId",
+    "SteamPID",
+)
+
+
+def _without_proton_client_handoff(environment: dict[str, str]) -> tuple[str, ...]:
+    """Drop the variables that send Proton's bootstrapper back into Steam.
+
+    The removed names are returned so the launch log records which route the game
+    environment actually took.
+    """
+    removed = tuple(
+        name for name in PROTON_CLIENT_HANDOFF_VARIABLES if name in environment
+    )
+    for name in removed:
+        environment.pop(name)
+    return removed
 
 
 def _client_runtime_proton(runtime_path: Path | str, managed_root: Path) -> Path | None:
@@ -1062,6 +1093,7 @@ def main() -> int:
         return 5
     environment.update(launch_environment)
     environment = _without_steam_client_session(environment)
+    removed_handoff: tuple[str, ...] = ()
     proton_script = _client_runtime_proton(runtime_path, compatibility.tools_directory)
     client_install = _steam_client_install_path(runtime_path) if proton_script else None
     if proton_script is not None and client_install is not None:
@@ -1072,6 +1104,7 @@ def main() -> int:
         launch_command = [os.fspath(proton_script), "run", *launch_command[1:]]
         environment["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = os.fspath(client_install)
         environment["PROTON_VERB"] = "run"
+        removed_handoff = _without_proton_client_handoff(environment)
         runtime_route = "client"
     else:
         runtime_route = "managed"
@@ -1079,6 +1112,11 @@ def main() -> int:
         root_data / "compatibility" / "logs",
         f"runtime route={runtime_route} layer={runtime_name}",
     )
+    if removed_handoff:
+        _write_log(
+            root_data / "compatibility" / "logs",
+            f"proton bootstrapper handoff removed {','.join(removed_handoff)}",
+        )
     if pre_launch:
         pre_process = subprocess.Popen(pre_launch, env=environment)  # noqa: S603 -- parsed trusted plan
         if pre_launch_wait:
