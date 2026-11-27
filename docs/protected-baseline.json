@@ -37,7 +37,8 @@
     ],
     "tests/test_cloud_saves.py": [
       "test_nonempty_local_save_uploads_and_creates_backup",
-      "test_cloud_saves_use_the_legendary_build_matching_the_process"
+      "test_cloud_saves_use_the_legendary_build_matching_the_process",
+      "test_cloud_cli_timeout_stops_the_tools_workers"
     ],
     "tests/test_compatibility.py": [
       "test_compatibility_finds_proton_in_external_steam_library",
@@ -59,7 +60,10 @@
       "test_legendary_executable_follows_the_running_process_architecture",
       "test_the_launcher_architecture_survives_for_the_plugin_host",
       "test_epic_install_sizes_reuse_the_recorded_answer",
-      "test_epic_install_sizes_still_report_a_code_without_a_record"
+      "test_epic_install_sizes_still_report_a_code_without_a_record",
+      "test_concurrent_library_requests_share_one_listing",
+      "test_epic_cli_calls_never_run_two_at_a_time",
+      "test_epic_cli_reports_busy_instead_of_stacking_another_run"
     ],
     "tests/test_hoyoplay_provider.py": [
       "test_provider_captures_and_switches_exact_official_channel_profiles",
@@ -90,7 +94,9 @@
     ],
     "tests/test_process.py": [
       "test_process_runner_allows_a_larger_limit_for_one_bounded_command",
-      "test_process_runner_allows_a_longer_window_for_one_bounded_command"
+      "test_process_runner_allows_a_longer_window_for_one_bounded_command",
+      "test_process_runner_timeout_stops_the_tools_own_workers",
+      "test_process_runner_cancellation_stops_the_tools_own_workers"
     ],
     "tests/test_steam_browser.py": [
       "test_login_page_body_does_not_replay_the_epic_authorization_endpoint",

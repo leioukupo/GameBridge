@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,6 +30,42 @@ class SafeProcessRunner:
     def __init__(self, timeout: float = 30, output_limit: int = 4 * 1024 * 1024) -> None:
         self.timeout = timeout
         self.output_limit = output_limit
+
+    @staticmethod
+    async def stop_process_group(process: asyncio.subprocess.Process) -> None:
+        """End the command together with every process it started.
+
+        A tool that spawns workers leaves them running when only its own pid is
+        killed: they keep their sockets open and their cpu, and each retry adds more.
+        """
+        kill_group = getattr(os, "killpg", None)
+        get_pgid = getattr(os, "getpgid", None)
+        group = None
+        if kill_group is not None and get_pgid is not None and process.returncode is None:
+            try:
+                group = get_pgid(process.pid)
+            except (ProcessLookupError, PermissionError):
+                group = None
+        if group is None:
+            process.kill()
+            await process.wait()
+            return
+        # A stopped member cannot act on SIGTERM until it is continued again.
+        for signal_number in (signal.SIGTERM, signal.SIGCONT):
+            try:
+                kill_group(group, signal_number)
+            except (ProcessLookupError, PermissionError):
+                await process.wait()
+                return
+        try:
+            await asyncio.wait_for(process.wait(), timeout=3)
+        except TimeoutError:
+            pass
+        try:
+            kill_group(group, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        await process.wait()
 
     async def run(
         self,
@@ -58,15 +95,18 @@ class SafeProcessRunner:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=child_environment,
+            start_new_session=True,
         )
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
                 process.communicate(), timeout=effective_timeout
             )
         except TimeoutError:
-            process.kill()
-            await process.wait()
+            await self.stop_process_group(process)
             raise TimeoutError(f"command timed out after {effective_timeout:g}s") from None
+        except asyncio.CancelledError:
+            await self.stop_process_group(process)
+            raise
         effective_output_limit = self.output_limit if output_limit is None else output_limit
         if effective_output_limit <= 0:
             raise ValueError("output_limit must be positive")

@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import UTC, datetime, timedelta
 
@@ -10,6 +11,84 @@ from gamebridge.providers.epic import (
     legendary_executable_for,
     legendary_tool_path,
 )
+
+class OverlapRunner:
+    """Counts how many Legendary calls overlap and answers only when released."""
+
+    def __init__(self, stdout: str = "") -> None:
+        self.calls = 0
+        self.running = 0
+        self.max_running = 0
+        self.release = asyncio.Event()
+        self.stdout = stdout
+
+    async def run(self, executable, *arguments, **kwargs):
+        self.calls += 1
+        self.running += 1
+        self.max_running = max(self.max_running, self.running)
+        try:
+            await self.release.wait()
+            return ProcessResult((str(executable), *arguments), 0, self.stdout, "")
+        finally:
+            self.running -= 1
+
+
+@pytest.mark.asyncio
+async def test_concurrent_library_requests_share_one_listing(tmp_path, monkeypatch):
+    provider = EpicProvider(tmp_path / "data", runner=EmptyListRunner())
+    monkeypatch.setattr(provider, "executable", lambda: tmp_path / "legendary")
+
+    first = asyncio.create_task(provider.library())
+    second = asyncio.create_task(provider.library())
+    results = await asyncio.gather(first, second)
+
+    assert provider.runner.calls == 1
+    assert results[0] == []
+    assert results[1] == []
+
+
+class EmptyListRunner:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def run(self, executable, *arguments, **kwargs):
+        self.calls += 1
+        await asyncio.sleep(0.05)
+        return ProcessResult((str(executable), *arguments), 0, "[]", "")
+
+
+@pytest.mark.asyncio
+async def test_epic_cli_calls_never_run_two_at_a_time(tmp_path, monkeypatch):
+    runner = OverlapRunner()
+    provider = EpicProvider(tmp_path / "data", runner=runner)
+    monkeypatch.setattr(provider, "executable", lambda: tmp_path / "legendary")
+
+    listing = asyncio.create_task(provider.check_updates())
+    await asyncio.sleep(0)
+    signing_out = asyncio.create_task(provider.logout())
+    await asyncio.sleep(0.05)
+    assert runner.max_running == 1
+
+    runner.release.set()
+    await asyncio.gather(listing, signing_out, return_exceptions=True)
+    assert runner.running == 0
+
+
+@pytest.mark.asyncio
+async def test_epic_cli_reports_busy_instead_of_stacking_another_run(tmp_path, monkeypatch):
+    monkeypatch.setattr("gamebridge.providers.epic.EPIC_CLI_ACQUIRE_TIMEOUT", 0.05)
+    runner = OverlapRunner()
+    provider = EpicProvider(tmp_path / "data", runner=runner)
+    monkeypatch.setattr(provider, "executable", lambda: tmp_path / "legendary")
+
+    holding = asyncio.create_task(provider.check_updates())
+    await asyncio.sleep(0)
+
+    with pytest.raises(RuntimeError, match="epic.cli_busy"):
+        await provider.logout()
+
+    runner.release.set()
+    await holding
 
 
 class FakeRunner:

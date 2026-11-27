@@ -1,6 +1,11 @@
 import json
 import os
+import subprocess
+import sys
+import time
 from pathlib import Path
+
+import pytest
 
 from gamebridge.cloud_saves import EpicCloudSaveManager
 
@@ -172,3 +177,28 @@ def test_legendary_process_uses_utc_to_avoid_dst_conflicts(tmp_path):
     cloud = manager(tmp_path, "{AppData}/Hogwarts/Saves/{EpicID}")
 
     assert cloud._environment()["TZ"] == "UTC"
+
+def test_cloud_cli_timeout_stops_the_tools_workers(tmp_path):
+    """A cut-off Legendary call must not leave its workers downloading."""
+    marker = tmp_path / "worker.pid"
+    script = tmp_path / "spawner.py"
+    script.write_text(
+        "import subprocess, sys, time\n"
+        "worker = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        f"open({str(marker)!r}, 'w').write(str(worker.pid))\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        EpicCloudSaveManager._run_cli([sys.executable, str(script)], {}, timeout=1)
+
+    pid = int(marker.read_text(encoding="utf-8"))
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.1)
+    raise AssertionError("the worker survived and keeps running")

@@ -140,6 +140,14 @@ Steam Deck 的真机结论需要单独记录，不得直接继承 Xbox Ally X �
 
 自动保护新增 8 条锁定测试：体积成功答案写缓存并在失败时回退、无缓存时仍返回稳定代码、体积不可读时仍列存储位置且不禁用安装、已有下载时第二款被拒、暂停中的下载同样占位、下载失败的任务不占位、安装记录被抹掉后回写、记录完整时不改写，以及安装对话框按 `sizes_available` 放行的界面合同。
 
+2026-11-27 定位「`plugin_loader.service` 下有很多 `legendary` python 进程，负载约 4.8，Wi-Fi 与 CPU 被吃满」。
+
+设备上的机制证据（2026-11-25 00:20-00:49 同一台 aarch64 掌机，当时只有一个 Epic 安装在跑）：`pgrep -cf tools/legendary` 计到 21，进程列表里除安装主进程外还有多个 `multiprocessing.forkserver` 进程，argv 中同样带 `providers/epic/tools/legendary` 路径。GameBridge 的 `SafeProcessRunner` 超时分支只 `process.kill()` 直接子进程，Legendary 自己 fork 出来的 worker 不属于被杀范围，会存活并保持已建立的连接；调用被重试时每次再加一组，这就是堆积的来源。Epic 云存档的 `subprocess.run(timeout=…)` 同样只处理直接子进程。
+
+改动：`SafeProcessRunner` 用 `start_new_session=True` 让命令自成进程组，超时与 `asyncio.CancelledError` 都按进程组收尾（TERM、CONT，3 秒后 KILL）；`EpicProvider` 增加进程内互斥，同一账号的 Legendary 命令一次只跑一个，20 秒内拿不到锁返回 `epic.cli_busy`（已加本地化文案）；并发的游戏库请求共用同一个 `legendary list` 任务，不再各自起一次冷启动；`EpicCloudSaveManager` 的两处 Legendary 调用改为按进程组收尾并沿用原有 `TimeoutExpired` 语义。
+
+状态：本轮只有自动检查。新增 6 条锁定测试（超时与取消都要带走 worker、云存档超时带走 worker、库请求合并、Legendary 不并行、排队超时返回 `epic.cli_busy`），Python 回归、类型检查与前端构建全部通过。测试设备离线，进程堆积是否消失、以及 `epic.cli_busy` 的实际界面表现均未做真机验证，保持「待验证」。
+
 ## 自动保护基线
 
 下列部分必须继续通过 Python 测试、TypeScript 类型检查和前端构建：

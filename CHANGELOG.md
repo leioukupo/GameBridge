@@ -1,5 +1,13 @@
 # 更新日志
 
+## 0.19.0-beta.17
+
+- 修掉 Legendary 进程堆积。GameBridge 每次调用 Legendary 都是一个独立的 Python 进程，而 Legendary 自己会用 `multiprocessing` 起若干 worker（命令行里同样带着 `tools/legendary` 路径）。此前超时或被取消时只杀掉 GameBridge 直接拉起的那个进程，worker 全部存活，继续占网络和 CPU；每次重试再加一组，`plugin_loader.service` 下就会攒出一堆 `legendary` python 进程。现在每个调用都在自己的进程组里运行，超时和取消都按整组收尾（先 TERM 再 CONT，3 秒后 KILL）。
+- 同一账号的 Legendary 命令改为排队执行，一次只跑一个。游戏库列表、状态检查、安装体积、更新检查、卸载不再并发起多个 Legendary 冷启动；排队 20 秒还拿不到就返回 `epic.cli_busy`，界面显示「GameBridge 还在等另一个 Epic 任务结束」。
+- 并发的游戏库请求共用一次 `legendary list`。几百款游戏的列表是一次很长的网络批量，重复请求只会叠加同样的流量。
+- Epic 云存档命令（`sync-saves`、`list-saves`）同样按进程组收尾，被打断时不留 worker。
+- 本轮为自动回归与代码检查通过，未在真机验证（测试设备离线）。
+
 ## 0.19.0-beta.16
 
 - 正在下载一款 Epic 游戏时，另一款游戏的安装对话框不再失败。下载会占满与 Epic 的连接，安装体积查询（`legendary info`）因此在 90 秒窗口内超时或读不到应答，插件把整个对话框判为失败。现在存储位置列表只依赖本地读数：体积读不到时照样列出可写入的位置、显示剩余空间并允许开始安装，只是游戏大小显示为未知。上一次成功读到的体积会按游戏缓存在 `providers/epic/cache/install-sizes.json`，下次直接复用。

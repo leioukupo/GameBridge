@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
@@ -33,6 +34,11 @@ EPIC_INFO_TIMEOUT = 90
 # generous window. The last good answer per app is kept so a second install can still
 # be started while the first one downloads.
 INSTALL_SIZE_CACHE_LIMIT = 200
+
+# Legendary is a cold start every time and a large account needs a full metadata
+# pass, so overlapping calls multiply the same work: one process group each, all
+# competing for the same link. Calls queue on this window and then say so plainly.
+EPIC_CLI_ACQUIRE_TIMEOUT = 20
 
 # Legendary unpacks native helper modules for a single CPU architecture.  When
 # the unpacked set belongs to another architecture, the interpreter reports it
@@ -132,6 +138,8 @@ class EpicProvider(GameProvider):
     def __init__(self, data_directory: str | Path, runner: SafeProcessRunner | None = None) -> None:
         self.data_directory = Path(data_directory)
         self.runner = runner or SafeProcessRunner()
+        self._cli_lock = asyncio.Lock()
+        self._library_task: asyncio.Task[list[GameReference]] | None = None
 
     def capabilities(self) -> ProviderCapabilities:
         return ProviderCapabilities(
@@ -252,8 +260,8 @@ class EpicProvider(GameProvider):
         if cached_status.get("message") == "epic.login_expired":
             return cached_status
         try:
-            version_result = await self.runner.run(executable, "--version", check=False)
-            result = await self.runner.run(
+            version_result = await self._cli(executable, "--version", check=False)
+            result = await self._cli(
                 executable,
                 "status",
                 "--offline",
@@ -314,11 +322,34 @@ class EpicProvider(GameProvider):
             return {"state": "error", "message": "epic.login_corrupt"}
 
     async def library(self) -> Sequence[GameReference]:
+        """Share one listing between concurrent library requests.
+
+        A request for a few hundred owned apps is one long network burst; a second
+        request while it runs adds nothing except load.
+        """
+        task = self._library_task
+        if task is None or task.done():
+            task = asyncio.create_task(self._read_library())
+            task.add_done_callback(self._retrieve_library_result)
+            self._library_task = task
+        return await asyncio.shield(task)
+
+    @staticmethod
+    def _retrieve_library_result(task: asyncio.Task[list[GameReference]]) -> None:
+        """Take the result of a listing nobody is waiting for anymore.
+
+        A requester that went away must not leave an unretrieved exception behind the
+        shared task; the journal noise would point nowhere.
+        """
+        if not task.cancelled():
+            task.exception()
+
+    async def _read_library(self) -> list[GameReference]:
         executable = self.executable()
         if executable is None:
             raise RuntimeError("legendary.not_installed")
         try:
-            result = await self.runner.run(
+            result = await self._cli(
                 executable,
                 "list",
                 "--json",
@@ -341,13 +372,30 @@ class EpicProvider(GameProvider):
                 games.append(GameReference(self.provider_id, app_name, title))
         return games
 
+    async def _cli(self, *arguments: str, **kwargs: object) -> object:
+        """Run one Legendary at a time for this account and tool directory.
+
+        Legendary rewrites its own configuration and unpacks helpers per process, and
+        every overlap repeats a cold start plus the same Epic requests.
+        """
+        try:
+            await asyncio.wait_for(
+                self._cli_lock.acquire(), timeout=EPIC_CLI_ACQUIRE_TIMEOUT
+            )
+        except TimeoutError:
+            raise RuntimeError("epic.cli_busy") from None
+        try:
+            return await self.runner.run(*arguments, **kwargs)
+        finally:
+            self._cli_lock.release()
+
     async def authenticate(self, authorization_code: str) -> JsonObject:
         executable = self.executable()
         if executable is None:
             raise RuntimeError("legendary.not_installed")
         code = self._normalize_authorization_code(authorization_code)
         try:
-            await self.runner.run(
+            await self._cli(
                 executable,
                 "auth",
                 "--code",
@@ -366,7 +414,7 @@ class EpicProvider(GameProvider):
         executable = self.executable()
         if executable is None:
             raise RuntimeError("legendary.not_installed")
-        await self.runner.run(
+        await self._cli(
             executable, "auth", "--delete", environment=self.environment()
         )
         return await self.connection_status()
@@ -376,7 +424,7 @@ class EpicProvider(GameProvider):
         if executable is None:
             raise RuntimeError("legendary.not_installed")
         try:
-            await self.runner.run(
+            await self._cli(
                 executable,
                 "-y",
                 "uninstall",
@@ -393,7 +441,7 @@ class EpicProvider(GameProvider):
         if executable is None:
             raise RuntimeError("legendary.not_installed")
         try:
-            result = await self.runner.run(
+            result = await self._cli(
                 executable,
                 "list-installed",
                 "--check-updates",
@@ -546,7 +594,7 @@ class EpicProvider(GameProvider):
         if executable is None:
             raise RuntimeError("legendary.not_installed")
         try:
-            result = await self.runner.run(
+            result = await self._cli(
                 executable,
                 "info",
                 external_game_id,

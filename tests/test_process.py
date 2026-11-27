@@ -1,4 +1,7 @@
+import asyncio
+import os
 import sys
+import time
 
 import pytest
 
@@ -82,3 +85,53 @@ async def test_process_error_keeps_the_tail_of_a_long_failure():
         await runner.run(sys.executable, "-c", program)
 
     assert str(raised.value).endswith(marker)
+
+def _write_spawner(tmp_path):
+    """A command that starts its own long-lived worker, like Legendary does."""
+    marker = tmp_path / "worker.pid"
+    script = tmp_path / "spawner.py"
+    script.write_text(
+        "import subprocess, sys, time\n"
+        "worker = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        f"open({str(marker)!r}, 'w').write(str(worker.pid))\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
+    return script, marker
+
+
+def _assert_worker_gone(marker):
+    pid = int(marker.read_text(encoding="utf-8"))
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.1)
+    raise AssertionError("the worker survived and keeps running")
+
+
+@pytest.mark.asyncio
+async def test_process_runner_timeout_stops_the_tools_own_workers(tmp_path):
+    script, marker = _write_spawner(tmp_path)
+    runner = SafeProcessRunner()
+
+    with pytest.raises(TimeoutError, match="timed out"):
+        await runner.run(sys.executable, str(script), timeout=1)
+
+    _assert_worker_gone(marker)
+
+
+@pytest.mark.asyncio
+async def test_process_runner_cancellation_stops_the_tools_own_workers(tmp_path):
+    script, marker = _write_spawner(tmp_path)
+    runner = SafeProcessRunner()
+    task = asyncio.create_task(runner.run(sys.executable, str(script), timeout=60))
+    await asyncio.sleep(0.6)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    _assert_worker_gone(marker)

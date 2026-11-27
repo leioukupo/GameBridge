@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import time
 from dataclasses import dataclass
@@ -306,13 +307,8 @@ class EpicCloudSaveManager:
             "--skip-upload" if direction == "download" else "--skip-download",
         ]
         try:
-            result = subprocess.run(
-                command,
-                env=self._environment(unpack_architecture),
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=180,
+            result = self._run_cli(
+                command, self._environment(unpack_architecture), timeout=180
             )
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError("cloud_save.timeout") from exc
@@ -322,17 +318,67 @@ class EpicCloudSaveManager:
         # the local parser; callers and logs receive structured state instead.
         return f"{result.stdout}\n{result.stderr}"
 
+    @staticmethod
+    def _run_cli(
+        command: list[str], env: dict[str, str], *, timeout: int
+    ) -> subprocess.CompletedProcess[str]:
+        """Run one Legendary call in its own process group.
+
+        Legendary starts worker processes of its own. Killing only the process GameBridge
+        spawned leaves those workers holding bandwidth and cpu, so the whole group is
+        stopped when the call is cut off.
+        """
+        process = subprocess.Popen(
+            command,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+            return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+        except subprocess.TimeoutExpired:
+            EpicCloudSaveManager._stop_process_group(process)
+            stdout, stderr = process.communicate()
+            raise subprocess.TimeoutExpired(command, timeout, output=stdout, stderr=stderr) from None
+
+    @staticmethod
+    def _stop_process_group(process: subprocess.Popen[str]) -> None:
+        kill_group = getattr(os, "killpg", None)
+        get_pgid = getattr(os, "getpgid", None)
+        if kill_group is None or get_pgid is None:
+            process.kill()
+            return
+        try:
+            group = get_pgid(process.pid)
+        except (ProcessLookupError, PermissionError):
+            process.kill()
+            return
+        # A stopped member cannot act on SIGTERM until it is continued again.
+        for signal_number in (signal.SIGTERM, signal.SIGCONT):
+            try:
+                kill_group(group, signal_number)
+            except (ProcessLookupError, PermissionError):
+                return
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            kill_group(group, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+
     def _cloud_timestamp(self, game_id: str) -> int:
         executable, unpack_architecture = self.cli()
         if not executable.is_file():
             return 0
         try:
-            result = subprocess.run(
+            result = self._run_cli(
                 [os.fspath(executable), "list-saves", game_id],
-                env=self._environment(unpack_architecture),
-                check=False,
-                capture_output=True,
-                text=True,
+                self._environment(unpack_architecture),
                 timeout=30,
             )
         except (OSError, subprocess.TimeoutExpired):
